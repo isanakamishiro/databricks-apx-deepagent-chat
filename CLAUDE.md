@@ -145,3 +145,4 @@ For backend patterns (DI, CRUD routers, AppConfig, lifespan) and frontend patter
 - **手を抜かない**：根本原因を見つける。一時的な修正は避ける。シニアエンジニアの水準を保つ。
 - **影響を最小化する**：変更は必要な箇所のみにとどめる。バグを新たに引き込まない。
 - ブラウザを利用するときはplaywright-cliを利用する。テストで取得したスナップショットは/screenshotsに保存するようにしてください。
+- 通常のplaywrightを使うのではなく、毎回必ずplaywright-cliを使ってください。

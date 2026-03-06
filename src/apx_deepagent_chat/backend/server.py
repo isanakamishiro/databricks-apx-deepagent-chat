@@ -1,5 +1,14 @@
+# これらは環境変数等の設定を鑑みて先にロードする
+from .core._config import AppConfig
+from .core._static import CachedStaticFiles, add_not_found_handler
+from .router import router as api_router
+from .._metadata import dist_dir
+
+# normal import
+
 import io
-from pathlib import PurePosixPath
+import logging
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from databricks.sdk import WorkspaceClient
@@ -9,19 +18,20 @@ from fastapi.responses import StreamingResponse
 from mlflow.genai.agent_server import AgentServer, setup_mlflow_git_based_version_tracking
 from pydantic import BaseModel
 
+
 # Import agent to register @invoke / @stream handlers with AgentServer
 from . import agent  # noqa: F401
-from .agent import AVAILABLE_MODELS, DEFAULT_MODEL
+from .agent import MODEL
 from .agent_utils import to_real_path, to_virtual_path
 from .chat_history import ChatHistoryStore
-from .core._config import AppConfig
-from .core._static import CachedStaticFiles, add_not_found_handler
-from .router import router as api_router
-from .._metadata import dist_dir
+
+
+logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
 # AgentServer provides /invocations and /responses endpoints
 agent_server = AgentServer("ResponsesAgent")
 app = agent_server.app
+setup_mlflow_git_based_version_tracking()
 
 
 @app.on_event("startup")
@@ -50,8 +60,8 @@ for route in list(app.routes):
 @app.get("/api/config")
 async def get_config():
     return {
-        "models": AVAILABLE_MODELS,
-        "default_model": DEFAULT_MODEL,
+        "models": [MODEL],
+        "default_model": MODEL,
     }
 
 
@@ -298,5 +308,3 @@ async def files_delete(
 if dist_dir.exists():
     app.mount("/", CachedStaticFiles(directory=dist_dir, html=True))
     add_not_found_handler(app)
-
-setup_mlflow_git_based_version_tracking()

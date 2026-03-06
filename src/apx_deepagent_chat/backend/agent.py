@@ -1,6 +1,5 @@
 import asyncio
 import functools
-import json
 import time
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
@@ -26,9 +25,6 @@ from mlflow.types.responses import (
     to_chat_completions_input,
 )
 
-from .docx_tools import create_docx_tools
-from .pdf_tools import create_pdf_tools
-from .pptx_tools import create_pptx_tools
 from .uc_backend import UCVolumesBackend
 from .uc_checkpointer import UCVolumesCheckpointer
 from .agent_utils import (
@@ -40,20 +36,8 @@ from .agent_utils import (
 mlflow.langchain.autolog()
 sp_workspace_client = WorkspaceClient()
 
-# src/myapp/backend/agent.py -> apx-sample/
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-_MODELS_CONFIG_PATH = _PROJECT_ROOT / "config" / "models.json"
-
-
-def _load_models_config() -> dict:
-    with open(_MODELS_CONFIG_PATH) as f:
-        return json.load(f)
-
-
-_models_config = _load_models_config()
-AVAILABLE_MODELS: list[str] = list(_models_config["models"].keys())
-DEFAULT_MODEL: str = _models_config["default_model"]
-
+MODEL = "databricks-qwen3-next-80b-a3b-instruct"
 ASSETS_DIR = _PROJECT_ROOT / "assets"
 
 # --- Module-level caches ---
@@ -148,19 +132,6 @@ async def _get_mcp_tools(workspace_client: WorkspaceClient) -> list:
         _mcp_tools_cache = tools
         _mcp_tools_cached_at = time.monotonic()
         return tools
-
-
-def _get_model_option(model_name: str, key: str, default=None):
-    """Get a model-specific option from the config."""
-    model_opts = _models_config["models"].get(model_name, {})
-    return model_opts.get(key, default)
-
-
-def _get_llm_model(request: ResponsesAgentRequest) -> str:
-    """Extract llm_model from custom_inputs, falling back to DEFAULT_MODEL."""
-    ci = dict(request.custom_inputs or {})
-    model = ci.get("llm_model", "")
-    return model if model in AVAILABLE_MODELS else DEFAULT_MODEL
 
 
 def _get_volume_path(request: ResponsesAgentRequest) -> str:
@@ -276,7 +247,7 @@ def get_current_time(timezone: str = "Asia/Tokyo") -> str:
     return now.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
-@functools.cache
+# @functools.cache
 def _load_subagents(config_path: Path) -> list:
     """Load subagent definitions from YAML and wire up tools (cached)."""
     available_tools = {
@@ -285,7 +256,7 @@ def _load_subagents(config_path: Path) -> list:
         "web_fetch": web_fetch,
     }
     # Tool names that require dynamic injection at init_agent() time
-    _dynamic_tool_keys = {"mcp_tools", "pptx_tools", "pdf_tools", "docx_tools"}
+    _dynamic_tool_keys = {"mcp_tools"}
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
@@ -308,12 +279,6 @@ def _load_subagents(config_path: Path) -> list:
             ]
             if "mcp_tools" in tool_names:
                 subagent["_pending_mcp_tools"] = True
-            if "pptx_tools" in tool_names:
-                subagent["_pending_pptx_tools"] = True
-            if "pdf_tools" in tool_names:
-                subagent["_pending_pdf_tools"] = True
-            if "docx_tools" in tool_names:
-                subagent["_pending_docx_tools"] = True
             if resolved:
                 subagent["tools"] = resolved
         subagents.append(subagent)
@@ -334,9 +299,6 @@ def _build_subagents(
 ) -> list:
     """Load subagent definitions from YAML and inject dynamic tools."""
     ws_client = workspace_client or sp_workspace_client
-    pptx_tools = create_pptx_tools(ws_client, volume_path)
-    pdf_tools = create_pdf_tools(ws_client, volume_path)
-    docx_tools = create_docx_tools(ws_client, volume_path)
 
     subagents = _load_subagents(ASSETS_DIR / "subagents.yaml")
     for sa in subagents:
@@ -346,15 +308,6 @@ def _build_subagents(
                 m for m in sa.get("middleware", []) if m is not strip_content_block_ids
             ]
             sa["middleware"] = existing + [strip_content_block_ids]
-        if sa.get("_pending_pptx_tools"):
-            sa["tools"] = pptx_tools + sa.get("tools", [])
-            del sa["_pending_pptx_tools"]
-        if sa.get("_pending_pdf_tools"):
-            sa["tools"] = pdf_tools + sa.get("tools", [])
-            del sa["_pending_pdf_tools"]
-        if sa.get("_pending_docx_tools"):
-            sa["tools"] = docx_tools + sa.get("tools", [])
-            del sa["_pending_docx_tools"]
 
     return subagents
 
@@ -363,58 +316,12 @@ async def init_agent(
     workspace_client: Optional[WorkspaceClient] = None,
     checkpointer=None,
     volume_path: Optional[str] = None,
-    llm_model: Optional[str] = None,
 ):
     ws_client = workspace_client or sp_workspace_client
     if not volume_path:
         raise ValueError("volume_path is required")
 
     mcp_tools = await _get_mcp_tools(ws_client)
-
-    # クロージャが必要なツール（volume_path / ws_client を参照）
-    @langchain_tool
-    def reset_skills() -> str:
-        """ボリュームの skills/ フォルダをデフォルトに復元します。ユーザから「リセット」と指示された場合に使用してください。"""
-        import io
-        from pathlib import PurePosixPath
-
-        assets_skills = _PROJECT_ROOT / "assets" / "skills"
-        if not assets_skills.is_dir():
-            return "エラー: デフォルトのスキルフォルダが見つかりません。"
-
-        count = 0
-        for local_path in assets_skills.rglob("*"):
-            if not local_path.is_file():
-                continue
-            rel = local_path.relative_to(assets_skills)
-            dest = f"{volume_path}/skills/{rel}"
-            parent = str(PurePosixPath(dest).parent)
-            try:
-                sp_workspace_client.files.create_directory(parent)
-            except Exception:
-                pass
-            sp_workspace_client.files.upload(
-                dest, io.BytesIO(local_path.read_bytes()), overwrite=True
-            )
-            count += 1
-
-        return f"skills/ をデフォルトに復元しました ({count} ファイル)。"
-
-    @langchain_tool
-    def reset_agent_config() -> str:
-        """ボリュームの AGENTS.md をデフォルトに復元します。ユーザからエージェント設定のリセットを指示された場合に使用してください。"""
-        import io
-
-        agents_md = _PROJECT_ROOT / "assets" / "AGENTS.md"
-        if not agents_md.is_file():
-            return "エラー: デフォルトの AGENTS.md が見つかりません。"
-
-        sp_workspace_client.files.upload(
-            f"{volume_path}/AGENTS.md",
-            io.BytesIO(agents_md.read_bytes()),
-            overwrite=True,
-        )
-        return "AGENTS.md をデフォルトに復元しました。"
 
     @langchain_tool
     def get_volume_browser_url(file_path: str) -> str:
@@ -455,20 +362,16 @@ async def init_agent(
             web_search,
             web_fetch,
             get_volume_browser_url,
-            reset_skills,
-            reset_agent_config,
             get_current_time,
         ],
         system_prompt=_load_system_prompt(ASSETS_DIR / "system_prompt.md"),
         memory=["AGENTS.md", "memories/instructions.md"],
         skills=["skills/"],
         model=ChatDatabricks(
-            endpoint=llm_model or DEFAULT_MODEL,
+            endpoint=MODEL,
             workspace_client=ws_client,
             temperature=0,
-            use_responses_api=_get_model_option(
-                llm_model or DEFAULT_MODEL, "use_responses_api", False
-            ),
+            use_responses_api=False,
         ),
         backend=UCVolumesBackend(
             volume_path=volume_path,
@@ -516,7 +419,6 @@ async def streaming(
 ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
     user_workspace_client = get_user_workspace_client()
     volume_path = _get_volume_path(request)
-    llm_model = _get_llm_model(request)
 
     checkpointer = UCVolumesCheckpointer(
         volume_path=volume_path,
@@ -526,7 +428,6 @@ async def streaming(
         user_workspace_client,
         checkpointer=checkpointer,
         volume_path=volume_path,
-        llm_model=llm_model,
     )
 
     all_messages = to_chat_completions_input([i.model_dump() for i in request.input])
@@ -535,7 +436,7 @@ async def streaming(
     thread_id = _get_or_create_thread_id(request)
     config = {"configurable": {"thread_id": thread_id}}
 
-    max_ctx = _get_model_option(llm_model, "max_context_tokens", 0)
+    max_ctx = 0
     usage_accumulator: dict[str, int] = {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -549,7 +450,7 @@ async def streaming(
             subgraphs=True,
         ),
         usage_accumulator=usage_accumulator,
-        model=llm_model,
+        model=MODEL,
         max_context_tokens=max_ctx,
     ):
         yield event
