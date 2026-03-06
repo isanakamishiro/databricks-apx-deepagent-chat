@@ -1,0 +1,22 @@
+bundle:
+  name: apx-deepagent-chat
+
+sync:
+  include:
+    - .build
+
+artifacts:
+  default:
+    build: apx build
+
+resources:
+  apps:
+    apx-deepagent-chat-app:
+      name: "apx-deepagent-chat"
+      description: "apx-deepagent-chat created with apx"
+      source_code_path: ./.build
+
+targets:
+  dev:
+    mode: development
+    default: true

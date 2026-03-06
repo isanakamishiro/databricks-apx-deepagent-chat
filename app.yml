@@ -1,0 +1,1 @@
+command: ["uvicorn", "apx_deepagent_chat.backend.app:app", "--workers", "2"]

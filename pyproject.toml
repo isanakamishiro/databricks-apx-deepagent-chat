@@ -1,0 +1,53 @@
+[project]
+name = "apx-deepagent-chat"
+dynamic = ["version"]
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.119.0",
+    "pydantic-settings>=2.11.0",
+    "uvicorn>=0.37.0",
+    "databricks-sdk>=0.74.0",
+]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.12",
+]
+
+[tool.apx.metadata]
+app-name = "apx-deepagent-chat"
+app-slug = "apx_deepagent_chat"
+app-entrypoint = "apx_deepagent_chat.backend.app:app"
+api-prefix = "/api"
+metadata-path = "src/apx_deepagent_chat/_metadata.py"
+
+[tool.apx.ui]
+root = "src/apx_deepagent_chat/ui"
+
+[tool.apx.ui.registries]
+"@animate-ui" = "https://animate-ui.com/r/{name}.json"
+"@ai-elements" = "https://registry.ai-sdk.dev/{name}.json"
+"@svgl" = "https://svgl.app/r/{name}.json"
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.version]
+path = "src/apx_deepagent_chat/_version.py"
+template = '''
+version = "{version}"
+'''
+
+[tool.hatch.build]
+artifacts = ["src/apx_deepagent_chat/__dist__", "src/apx_deepagent_chat/_metadata.py"]
+exclude = ["src/apx_deepagent_chat/ui"]
