@@ -186,8 +186,10 @@ async def process_agent_astream_events(
         # --- メインエージェントのイベント ---
         if _current_agent_name is not None:
             yield _log_and_yield(ResponsesAgentStreamEvent(
-                type="subagent.end",
-                name=_current_agent_name,  # type: ignore[call-arg]
+                **create_text_delta(
+                    delta="</subagent>",
+                    item_id=f"subagent-end-{id(event)}",
+                )
             ))
             _current_agent_name = None
 
