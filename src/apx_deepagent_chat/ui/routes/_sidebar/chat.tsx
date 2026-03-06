@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, SendHorizonal } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight, Loader2, SendHorizonal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -23,10 +23,19 @@ type SubagentBlock = {
   content: string;
 };
 
+type ToolCallBlock = {
+  callId: string;
+  name: string;
+  arguments: string; // JSON文字列
+  result?: string;   // function_call_output が来たら埋める
+};
+
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   subagentBlocks?: SubagentBlock[];
+  toolCallBlocks?: ToolCallBlock[];
+  isError?: boolean;
   usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
   model?: string;
   maxContextTokens?: number;
@@ -92,6 +101,78 @@ function SubagentSection({ block }: { block: SubagentBlock }) {
         <div className="border-t border-border px-3 py-2 text-muted-foreground whitespace-pre-wrap">
           {block.content || "(no output)"}
         </div>
+      )}
+    </div>
+  );
+}
+
+function ToolCallSection({
+  block,
+  isStreaming,
+}: {
+  block: ToolCallBlock;
+  isStreaming?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isDone = block.result !== undefined;
+  let prettyArgs = block.arguments;
+  try {
+    prettyArgs = JSON.stringify(JSON.parse(block.arguments), null, 2);
+  } catch {
+    // そのまま表示
+  }
+  return (
+    <div className="my-1 rounded border border-border bg-muted/40 text-xs">
+      <button
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-muted-foreground hover:text-foreground"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {isStreaming && !isDone ? (
+          <Loader2 size={12} className="animate-spin" />
+        ) : (
+          <span className="text-green-600">✓</span>
+        )}
+        <span className="font-mono">🔧 {block.name}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border px-3 py-2 space-y-2">
+          <div>
+            <div className="text-muted-foreground font-semibold mb-1">引数</div>
+            <pre className="whitespace-pre-wrap text-muted-foreground">{prettyArgs}</pre>
+          </div>
+          {isDone && (
+            <div>
+              <div className="text-muted-foreground font-semibold mb-1">結果</div>
+              <pre className="whitespace-pre-wrap text-muted-foreground">{block.result || "(no output)"}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ErrorMessage({
+  content,
+  onRetry,
+}: {
+  content: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm">
+      <div className="flex items-start gap-2">
+        <AlertCircle size={16} className="mt-0.5 shrink-0 text-destructive" />
+        <span className="text-destructive">{content}</span>
+      </div>
+      {onRetry && (
+        <button
+          className="mt-2 text-xs text-destructive underline hover:no-underline"
+          onClick={onRetry}
+        >
+          再試行
+        </button>
       )}
     </div>
   );
@@ -217,7 +298,7 @@ export function Chat({
     // 空のアシスタントメッセージを追加
     setMessages((prev) => [
       ...prev,
-      { role: "assistant", content: "", subagentBlocks: [] },
+      { role: "assistant", content: "", subagentBlocks: [], toolCallBlocks: [] },
     ]);
 
     try {
@@ -286,6 +367,43 @@ export function Chat({
                   }
                   return updated;
                 });
+              } else if (resolvedType === "response.output_item.done") {
+                const item = data.item ?? {};
+                if (item.type === "function_call") {
+                  const newBlock: ToolCallBlock = {
+                    callId: item.call_id ?? item.id ?? "",
+                    name: item.name ?? "",
+                    arguments: item.arguments ?? "",
+                  };
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const last = updated[updated.length - 1];
+                    if (last?.role === "assistant") {
+                      updated[updated.length - 1] = {
+                        ...last,
+                        toolCallBlocks: [...(last.toolCallBlocks ?? []), newBlock],
+                      };
+                    }
+                    return updated;
+                  });
+                } else if (item.type === "function_call_output") {
+                  const callId = item.call_id ?? "";
+                  const result = item.output ?? "";
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const last = updated[updated.length - 1];
+                    if (last?.role === "assistant" && last.toolCallBlocks) {
+                      const updatedBlocks = last.toolCallBlocks.map((b) =>
+                        b.callId === callId ? { ...b, result } : b
+                      );
+                      updated[updated.length - 1] = {
+                        ...last,
+                        toolCallBlocks: updatedBlocks,
+                      };
+                    }
+                    return updated;
+                  });
+                }
               } else if (resolvedType === "response.completed") {
                 const resp = data.response ?? {};
                 const usage = resp.usage;
@@ -308,10 +426,11 @@ export function Chat({
                 setMessages((prev) => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
-                  if (last?.role === "assistant" && last.content === "") {
+                  if (last?.role === "assistant") {
                     updated[updated.length - 1] = {
                       ...last,
                       content: `Error: ${data.error}`,
+                      isError: true,
                     };
                   }
                   return updated;
@@ -327,10 +446,11 @@ export function Chat({
       setMessages((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
-        if (last?.role === "assistant" && last.content === "") {
+        if (last?.role === "assistant") {
           updated[updated.length - 1] = {
             ...last,
             content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
+            isError: true,
           };
         }
         return updated;
@@ -373,33 +493,80 @@ export function Chat({
             Send a message to start chatting
           </div>
         )}
-        {messages.map((msg, i) => (
-          <Message key={i} from={msg.role}>
-            <MessageContent>
-              {msg.role === "assistant" ? (
-                <div>
-                  {/* サブエージェントブロック */}
-                  {msg.subagentBlocks && msg.subagentBlocks.length > 0 && (
-                    <div className="mb-2 space-y-1">
-                      {msg.subagentBlocks.map((block, bi) => (
-                        <SubagentSection key={bi} block={block} />
-                      ))}
+        {messages.map((msg, i) => {
+          const isLastAssistant =
+            i === messages.length - 1 && msg.role === "assistant";
+          const showTypingIndicator =
+            isLastAssistant &&
+            streaming &&
+            msg.content === "" &&
+            (!msg.subagentBlocks || msg.subagentBlocks.length === 0) &&
+            (!msg.toolCallBlocks || msg.toolCallBlocks.length === 0);
+
+          return (
+            <Message key={i} from={msg.role}>
+              <MessageContent>
+                {msg.role === "assistant" ? (
+                  showTypingIndicator ? (
+                    <div className="flex items-center gap-1 px-1 py-1">
+                      <span className="h-2 w-2 rounded-full bg-current animate-bounce [animation-delay:-0.3s]" />
+                      <span className="h-2 w-2 rounded-full bg-current animate-bounce [animation-delay:-0.15s]" />
+                      <span className="h-2 w-2 rounded-full bg-current animate-bounce" />
                     </div>
-                  )}
-                  {/* メイン応答 */}
-                  <MessageResponse>{msg.content}</MessageResponse>
-                  {/* Usage */}
-                  <UsageBadge
-                    usage={msg.usage}
-                    maxContextTokens={msg.maxContextTokens}
-                  />
-                </div>
-              ) : (
-                msg.content
-              )}
-            </MessageContent>
-          </Message>
-        ))}
+                  ) : (
+                    <div>
+                      {/* ToolCall ブロック */}
+                      {msg.toolCallBlocks && msg.toolCallBlocks.length > 0 && (
+                        <div className="mb-2 space-y-1">
+                          {msg.toolCallBlocks.map((block, bi) => (
+                            <ToolCallSection
+                              key={bi}
+                              block={block}
+                              isStreaming={isLastAssistant && streaming}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {/* サブエージェントブロック */}
+                      {msg.subagentBlocks && msg.subagentBlocks.length > 0 && (
+                        <div className="mb-2 space-y-1">
+                          {msg.subagentBlocks.map((block, bi) => (
+                            <SubagentSection key={bi} block={block} />
+                          ))}
+                        </div>
+                      )}
+                      {/* メイン応答またはエラー */}
+                      {msg.isError ? (
+                        <ErrorMessage
+                          content={msg.content}
+                          onRetry={() => {
+                            // 直前のユーザーメッセージを再送信
+                            const lastUser = [...messages]
+                              .reverse()
+                              .find((m) => m.role === "user");
+                            if (lastUser) {
+                              setMessages((prev) => prev.slice(0, -1));
+                              setInput(lastUser.content);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <MessageResponse>{msg.content}</MessageResponse>
+                      )}
+                      {/* Usage */}
+                      <UsageBadge
+                        usage={msg.usage}
+                        maxContextTokens={msg.maxContextTokens}
+                      />
+                    </div>
+                  )
+                ) : (
+                  msg.content
+                )}
+              </MessageContent>
+            </Message>
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 
