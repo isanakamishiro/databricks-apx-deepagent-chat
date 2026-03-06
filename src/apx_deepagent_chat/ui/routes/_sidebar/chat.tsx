@@ -41,50 +41,6 @@ type ChatMessage = {
   maxContextTokens?: number;
 };
 
-/** SSE テキストデルタからサブエージェントブロックとメイン本文を分離する */
-function parseSubagentBlocks(raw: string): {
-  mainText: string;
-  subagentBlocks: SubagentBlock[];
-} {
-  const blocks: SubagentBlock[] = [];
-  let mainText = "";
-  let remaining = raw;
-
-  const nameTagRe = /<name>([^<]+)<\/name>/g;
-  let match;
-  const positions: { index: number; name: string }[] = [];
-  while ((match = nameTagRe.exec(remaining)) !== null) {
-    positions.push({ index: match.index, name: match[1] });
-  }
-
-  if (positions.length === 0) {
-    // </subagent> タグを除去してそのまま返す
-    mainText = remaining.replace(/<\/subagent>/g, "");
-    return { mainText, subagentBlocks: blocks };
-  }
-
-  let cursor = 0;
-  for (let i = 0; i < positions.length; i++) {
-    const pos = positions[i];
-    // <name> タグの前にあるテキストはメイン本文
-    if (pos.index > cursor) {
-      mainText += remaining.slice(cursor, pos.index);
-    }
-    // ブロック終端を探す
-    const afterName = remaining.indexOf(">", pos.index) + 1;
-    const endTag = remaining.indexOf("</subagent>", afterName);
-    const blockContent =
-      endTag >= 0
-        ? remaining.slice(afterName, endTag)
-        : remaining.slice(afterName);
-    blocks.push({ name: pos.name, content: blockContent });
-    cursor = endTag >= 0 ? endTag + "</subagent>".length : remaining.length;
-  }
-
-  // 残りはメイン本文
-  mainText += remaining.slice(cursor).replace(/<\/subagent>/g, "");
-  return { mainText, subagentBlocks: blocks };
-}
 
 function SubagentSection({ block }: { block: SubagentBlock }) {
   const [expanded, setExpanded] = useState(false);
@@ -326,8 +282,6 @@ export function Chat({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      // 累積テキスト（サブエージェントブロック解析用）
-      let accumulatedRaw = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -352,21 +306,32 @@ export function Chat({
                 resolvedType === "response.output_text.delta" &&
                 typeof data.delta === "string"
               ) {
-                accumulatedRaw += data.delta;
-                const { mainText, subagentBlocks } =
-                  parseSubagentBlocks(accumulatedRaw);
                 setMessages((prev) => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
                   if (last?.role === "assistant") {
                     updated[updated.length - 1] = {
                       ...last,
-                      content: mainText,
-                      subagentBlocks,
+                      content: (last.content ?? "") + data.delta,
                     };
                   }
                   return updated;
                 });
+              } else if (resolvedType === "subagent.start") {
+                const name = (data as { name?: string }).name ?? "";
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last?.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      subagentBlocks: [...(last.subagentBlocks ?? []), { name, content: "" }],
+                    };
+                  }
+                  return updated;
+                });
+              } else if (resolvedType === "subagent.end") {
+                // 将来的にアクティブ/完了状態の切り替えに使用可能（現時点では何もしない）
               } else if (resolvedType === "response.output_item.done") {
                 const item = data.item ?? {};
                 if (item.type === "function_call") {

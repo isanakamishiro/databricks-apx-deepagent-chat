@@ -2,6 +2,8 @@ import logging
 from typing import Any, AsyncGenerator, AsyncIterator, Optional
 from uuid import uuid4
 
+logger = logging.getLogger(__name__)
+
 from databricks.sdk import WorkspaceClient
 import json
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
@@ -98,6 +100,10 @@ async def process_agent_astream_events(
     _text_item_id: str | None = None
     _all_output_items: list[dict[str, Any]] = []
 
+    def _log_and_yield(item: ResponsesAgentStreamEvent) -> ResponsesAgentStreamEvent:
+        logger.debug("[yield] type=%s data=%s", item.type, item.model_dump())
+        return item
+
     def _accumulate_usage(msg):
         """AIMessage/AIMessageChunk の usage_metadata をアキュムレータに加算する."""
         if usage_accumulator is None:
@@ -136,6 +142,7 @@ async def process_agent_astream_events(
     async for event in async_stream:
         # subgraphs=True: event is a 3-tuple (namespace, mode, data)
         _ns, mode, data = event
+        logger.debug("[stream] ns=%s mode=%s data_type=%s", _ns, mode, type(data).__name__)
 
         if _ns != ():
             # --- サブエージェントのイベント ---
@@ -146,12 +153,10 @@ async def process_agent_astream_events(
                     agent_name = metadata.get("lc_agent_name")
                     if agent_name and agent_name != _current_agent_name:
                         _current_agent_name = agent_name
-                        yield ResponsesAgentStreamEvent(
-                            **create_text_delta(
-                                delta=f"<name>{agent_name}</name>",
-                                item_id=f"subagent-{agent_name}-{id(event)}",
-                            )
-                        )
+                        yield _log_and_yield(ResponsesAgentStreamEvent(
+                            type="subagent.start",
+                            name=agent_name,  # type: ignore[call-arg]
+                        ))
                 except Exception as e:
                     logging.exception(f"Error extracting subagent name: {e}")
                 continue
@@ -175,17 +180,15 @@ async def process_agent_astream_events(
                             node_data["messages"]
                         ):
                             _collect_output_items(item)
-                            yield item
+                            yield _log_and_yield(item)
                 continue
 
         # --- メインエージェントのイベント ---
         if _current_agent_name is not None:
-            yield ResponsesAgentStreamEvent(
-                **create_text_delta(
-                    delta="</subagent>",
-                    item_id=f"subagent-end-{id(event)}",
-                )
-            )
+            yield _log_and_yield(ResponsesAgentStreamEvent(
+                type="subagent.end",
+                name=_current_agent_name,  # type: ignore[call-arg]
+            ))
             _current_agent_name = None
 
         if mode == "updates":
@@ -219,7 +222,7 @@ async def process_agent_astream_events(
                     if filtered_msgs:
                         for item in output_to_responses_items_stream(filtered_msgs):  # type: ignore[arg-type]
                             _collect_output_items(item)
-                            yield item
+                            yield _log_and_yield(item)
         elif mode == "messages":
             try:
                 chunk = data[0]
@@ -228,13 +231,14 @@ async def process_agent_astream_events(
                     if text:
                         _accumulated_text += text
                         _text_item_id = chunk.id
-                        yield ResponsesAgentStreamEvent(
+                        yield _log_and_yield(ResponsesAgentStreamEvent(
                             **create_text_delta(delta=text, item_id=chunk.id)
-                        )
+                        ))
             except Exception as e:
                 logging.exception(f"Error processing agent stream event: {e}")
 
     # --- ストリーム完了後 ---
+    logger.debug("[stream] completed. accumulated_text_len=%d output_items=%d", len(_accumulated_text), len(_all_output_items))
 
     # 集約テキストの response.output_item.done を emit
     if _accumulated_text:
@@ -242,9 +246,9 @@ async def process_agent_astream_events(
             _accumulated_text, _text_item_id or str(uuid4())
         )
         _all_output_items.append(text_output_item)
-        yield ResponsesAgentStreamEvent(
+        yield _log_and_yield(ResponsesAgentStreamEvent(
             type="response.output_item.done", item=text_output_item  # type: ignore[call-arg]
-        )
+        ))
 
     # response.completed を emit（mlflow 準拠の type）
     _ua = usage_accumulator or {}
@@ -268,18 +272,18 @@ async def process_agent_astream_events(
     if max_context_tokens is not None:
         response_data["max_context_tokens"] = max_context_tokens
 
-    yield ResponsesAgentStreamEvent(
+    yield _log_and_yield(ResponsesAgentStreamEvent(
         type="response.completed",
         response=response_data,  # type: ignore[call-arg]
-    )
+    ))
 
     # responses.completed を emit（BFF の @databricks/ai-sdk-provider 用）
     # プロバイダーは "responses.completed" から usage を取得し streamText の
     # onFinish → data-usage としてフロントエンドに伝播する。
-    yield ResponsesAgentStreamEvent(
+    yield _log_and_yield(ResponsesAgentStreamEvent(
         type="responses.completed",
         response=response_data,  # type: ignore[call-arg]
-    )
+    ))
 
 
 def to_real_path(volume_path: str, virtual_path: str) -> str:
