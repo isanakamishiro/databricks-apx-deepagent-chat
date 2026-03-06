@@ -121,3 +121,11 @@
     @apply bg-background text-foreground;
   }
 }
+
+:root {
+  --sidebar-background: 0 0% 98%;
+}
+
+.dark {
+  --sidebar-background: 240 5.9% 10%;
+}
