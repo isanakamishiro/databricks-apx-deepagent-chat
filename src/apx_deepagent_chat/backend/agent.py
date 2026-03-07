@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import os
 import time
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
@@ -41,8 +42,22 @@ mlflow.langchain.autolog()
 sp_workspace_client = WorkspaceClient()
 
 MODEL = "databricks-qwen3-next-80b-a3b-instruct"
+USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 _TEXT_SUFFIXES = {".md", ".py", ".txt"}
+
+
+def _make_fake_model():
+    """FakeListChatModel を構築して返す（開発モード用）."""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    FAKE_RESPONSE = "こんにちは！私は元気です！"
+
+    class ToolCapableFakeModel(FakeListChatModel):
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+    return ToolCapableFakeModel(responses=[FAKE_RESPONSE] * 20)
 
 
 # --- Module-level caches ---
@@ -355,6 +370,10 @@ async def init_agent(
     volume_path: Optional[str] = None,
     override_model=None,
 ):
+    # 開発モード: USE_FAKE_MODEL=true の場合は FakeListChatModel を使用
+    if override_model is None and USE_FAKE_MODEL:
+        override_model = _make_fake_model()
+
     ws_client = workspace_client or sp_workspace_client
     if not volume_path:
         raise ValueError("volume_path is required")
