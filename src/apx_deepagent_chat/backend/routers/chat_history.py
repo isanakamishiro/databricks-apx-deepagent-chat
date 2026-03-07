@@ -9,16 +9,9 @@ from ..core import Dependencies
 
 router = APIRouter()
 
-_history_stores: dict[str, ChatHistoryStore] = {}
-
-
 def _get_history_store(volume_path: str, ws: WorkspaceClient) -> ChatHistoryStore:
-    if volume_path not in _history_stores:
-        _history_stores[volume_path] = ChatHistoryStore(
-            volume_path=volume_path,
-            workspace_client=ws,
-        )
-    return _history_stores[volume_path]
+    # OBO トークンはリクエストごとに異なるため、キャッシュせず毎回生成する
+    return ChatHistoryStore(volume_path=volume_path, workspace_client=ws)
 
 
 def _extract_volume_path(request: Request) -> str:
