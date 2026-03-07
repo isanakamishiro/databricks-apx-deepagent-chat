@@ -12,7 +12,7 @@ export class ApiError extends Error {
         this.body = body;
     }
 }
-export interface Body_files_upload_api_files_upload_post {
+export interface Body_filesUpload {
     file: string;
     path: string;
 }
@@ -155,12 +155,12 @@ export function useChat(options?: {
         ...options?.mutation
     });
 }
-export interface List_chats_api_chat_history_getParams {
+export interface ListChatsParams {
     user_id: string;
     limit?: number;
     ending_before?: string | null;
 }
-export const list_chats_api_chat_history_get = async (params: List_chats_api_chat_history_getParams, options?: RequestInit): Promise<{
+export const listChats = async (params: ListChatsParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const searchParams = new URLSearchParams();
@@ -187,41 +187,41 @@ export const list_chats_api_chat_history_get = async (params: List_chats_api_cha
         data: await res.json()
     };
 };
-export const list_chats_api_chat_history_getKey = (params?: List_chats_api_chat_history_getParams)=>{
+export const listChatsKey = (params?: ListChatsParams)=>{
     return [
         "/api/chat-history",
         params
     ] as const;
 };
-export function useList_chats_api_chat_history_get<TData = {
+export function useListChats<TData = {
     data: unknown;
 }>(options: {
-    params: List_chats_api_chat_history_getParams;
+    params: ListChatsParams;
     query?: Omit<UseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useQuery({
-        queryKey: list_chats_api_chat_history_getKey(options.params),
-        queryFn: ()=>list_chats_api_chat_history_get(options.params),
+        queryKey: listChatsKey(options.params),
+        queryFn: ()=>listChats(options.params),
         ...options?.query
     });
 }
-export function useList_chats_api_chat_history_getSuspense<TData = {
+export function useListChatsSuspense<TData = {
     data: unknown;
 }>(options: {
-    params: List_chats_api_chat_history_getParams;
+    params: ListChatsParams;
     query?: Omit<UseSuspenseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useSuspenseQuery({
-        queryKey: list_chats_api_chat_history_getKey(options.params),
-        queryFn: ()=>list_chats_api_chat_history_get(options.params),
+        queryKey: listChatsKey(options.params),
+        queryFn: ()=>listChats(options.params),
         ...options?.query
     });
 }
-export const save_chat_api_chat_history_post = async (data: SaveChatRequest, options?: RequestInit): Promise<{
+export const saveChat = async (data: SaveChatRequest, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const res = await fetch("/api/chat-history", {
@@ -247,21 +247,21 @@ export const save_chat_api_chat_history_post = async (data: SaveChatRequest, opt
         data: await res.json()
     };
 };
-export function useSave_chat_api_chat_history_post(options?: {
+export function useSaveChat(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
     }, ApiError, SaveChatRequest>;
 }) {
     return useMutation({
-        mutationFn: (data)=>save_chat_api_chat_history_post(data),
+        mutationFn: (data)=>saveChat(data),
         ...options?.mutation
     });
 }
-export interface Get_chat_api_chat_history__chat_id__getParams {
+export interface GetChatParams {
     chat_id: string;
     user_id: string;
 }
-export const get_chat_api_chat_history__chat_id__get = async (params: Get_chat_api_chat_history__chat_id__getParams, options?: RequestInit): Promise<{
+export const getChat = async (params: GetChatParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const searchParams = new URLSearchParams();
@@ -286,45 +286,45 @@ export const get_chat_api_chat_history__chat_id__get = async (params: Get_chat_a
         data: await res.json()
     };
 };
-export const get_chat_api_chat_history__chat_id__getKey = (params?: Get_chat_api_chat_history__chat_id__getParams)=>{
+export const getChatKey = (params?: GetChatParams)=>{
     return [
         "/api/chat-history/{chat_id}",
         params
     ] as const;
 };
-export function useGet_chat_api_chat_history__chat_id__get<TData = {
+export function useGetChat<TData = {
     data: unknown;
 }>(options: {
-    params: Get_chat_api_chat_history__chat_id__getParams;
+    params: GetChatParams;
     query?: Omit<UseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useQuery({
-        queryKey: get_chat_api_chat_history__chat_id__getKey(options.params),
-        queryFn: ()=>get_chat_api_chat_history__chat_id__get(options.params),
+        queryKey: getChatKey(options.params),
+        queryFn: ()=>getChat(options.params),
         ...options?.query
     });
 }
-export function useGet_chat_api_chat_history__chat_id__getSuspense<TData = {
+export function useGetChatSuspense<TData = {
     data: unknown;
 }>(options: {
-    params: Get_chat_api_chat_history__chat_id__getParams;
+    params: GetChatParams;
     query?: Omit<UseSuspenseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useSuspenseQuery({
-        queryKey: get_chat_api_chat_history__chat_id__getKey(options.params),
-        queryFn: ()=>get_chat_api_chat_history__chat_id__get(options.params),
+        queryKey: getChatKey(options.params),
+        queryFn: ()=>getChat(options.params),
         ...options?.query
     });
 }
-export interface Delete_chat_api_chat_history__chat_id__deleteParams {
+export interface DeleteChatParams {
     chat_id: string;
     user_id: string;
 }
-export const delete_chat_api_chat_history__chat_id__delete = async (params: Delete_chat_api_chat_history__chat_id__deleteParams, options?: RequestInit): Promise<{
+export const deleteChat = async (params: DeleteChatParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const searchParams = new URLSearchParams();
@@ -349,23 +349,23 @@ export const delete_chat_api_chat_history__chat_id__delete = async (params: Dele
         data: await res.json()
     };
 };
-export function useDelete_chat_api_chat_history__chat_id__delete(options?: {
+export function useDeleteChat(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
     }, ApiError, {
-        params: Delete_chat_api_chat_history__chat_id__deleteParams;
+        params: DeleteChatParams;
     }>;
 }) {
     return useMutation({
-        mutationFn: (vars)=>delete_chat_api_chat_history__chat_id__delete(vars.params),
+        mutationFn: (vars)=>deleteChat(vars.params),
         ...options?.mutation
     });
 }
-export interface Get_messages_api_chat_history__chat_id__messages_getParams {
+export interface GetMessagesParams {
     chat_id: string;
     user_id: string;
 }
-export const get_messages_api_chat_history__chat_id__messages_get = async (params: Get_messages_api_chat_history__chat_id__messages_getParams, options?: RequestInit): Promise<{
+export const getMessages = async (params: GetMessagesParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const searchParams = new URLSearchParams();
@@ -390,44 +390,44 @@ export const get_messages_api_chat_history__chat_id__messages_get = async (param
         data: await res.json()
     };
 };
-export const get_messages_api_chat_history__chat_id__messages_getKey = (params?: Get_messages_api_chat_history__chat_id__messages_getParams)=>{
+export const getMessagesKey = (params?: GetMessagesParams)=>{
     return [
         "/api/chat-history/{chat_id}/messages",
         params
     ] as const;
 };
-export function useGet_messages_api_chat_history__chat_id__messages_get<TData = {
+export function useGetMessages<TData = {
     data: unknown;
 }>(options: {
-    params: Get_messages_api_chat_history__chat_id__messages_getParams;
+    params: GetMessagesParams;
     query?: Omit<UseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useQuery({
-        queryKey: get_messages_api_chat_history__chat_id__messages_getKey(options.params),
-        queryFn: ()=>get_messages_api_chat_history__chat_id__messages_get(options.params),
+        queryKey: getMessagesKey(options.params),
+        queryFn: ()=>getMessages(options.params),
         ...options?.query
     });
 }
-export function useGet_messages_api_chat_history__chat_id__messages_getSuspense<TData = {
+export function useGetMessagesSuspense<TData = {
     data: unknown;
 }>(options: {
-    params: Get_messages_api_chat_history__chat_id__messages_getParams;
+    params: GetMessagesParams;
     query?: Omit<UseSuspenseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useSuspenseQuery({
-        queryKey: get_messages_api_chat_history__chat_id__messages_getKey(options.params),
-        queryFn: ()=>get_messages_api_chat_history__chat_id__messages_get(options.params),
+        queryKey: getMessagesKey(options.params),
+        queryFn: ()=>getMessages(options.params),
         ...options?.query
     });
 }
-export interface Save_messages_endpoint_api_chat_history__chat_id__messages_postParams {
+export interface SaveMessagesParams {
     chat_id: string;
 }
-export const save_messages_endpoint_api_chat_history__chat_id__messages_post = async (params: Save_messages_endpoint_api_chat_history__chat_id__messages_postParams, data: SaveMessagesRequest, options?: RequestInit): Promise<{
+export const saveMessages = async (params: SaveMessagesParams, data: SaveMessagesRequest, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const res = await fetch(`/api/chat-history/${params.chat_id}/messages`, {
@@ -453,20 +453,20 @@ export const save_messages_endpoint_api_chat_history__chat_id__messages_post = a
         data: await res.json()
     };
 };
-export function useSave_messages_endpoint_api_chat_history__chat_id__messages_post(options?: {
+export function useSaveMessages(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
     }, ApiError, {
-        params: Save_messages_endpoint_api_chat_history__chat_id__messages_postParams;
+        params: SaveMessagesParams;
         data: SaveMessagesRequest;
     }>;
 }) {
     return useMutation({
-        mutationFn: (vars)=>save_messages_endpoint_api_chat_history__chat_id__messages_post(vars.params, vars.data),
+        mutationFn: (vars)=>saveMessages(vars.params, vars.data),
         ...options?.mutation
     });
 }
-export const get_config_api_config_get = async (options?: RequestInit): Promise<{
+export const getConfig = async (options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const res = await fetch("/api/config", {
@@ -487,12 +487,12 @@ export const get_config_api_config_get = async (options?: RequestInit): Promise<
         data: await res.json()
     };
 };
-export const get_config_api_config_getKey = ()=>{
+export const getConfigKey = ()=>{
     return [
         "/api/config"
     ] as const;
 };
-export function useGet_config_api_config_get<TData = {
+export function useGetConfig<TData = {
     data: unknown;
 }>(options?: {
     query?: Omit<UseQueryOptions<{
@@ -500,12 +500,12 @@ export function useGet_config_api_config_get<TData = {
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useQuery({
-        queryKey: get_config_api_config_getKey(),
-        queryFn: ()=>get_config_api_config_get(),
+        queryKey: getConfigKey(),
+        queryFn: ()=>getConfig(),
         ...options?.query
     });
 }
-export function useGet_config_api_config_getSuspense<TData = {
+export function useGetConfigSuspense<TData = {
     data: unknown;
 }>(options?: {
     query?: Omit<UseSuspenseQueryOptions<{
@@ -513,8 +513,8 @@ export function useGet_config_api_config_getSuspense<TData = {
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useSuspenseQuery({
-        queryKey: get_config_api_config_getKey(),
-        queryFn: ()=>get_config_api_config_get(),
+        queryKey: getConfigKey(),
+        queryFn: ()=>getConfig(),
         ...options?.query
     });
 }
@@ -602,11 +602,11 @@ export function useCurrentUserSuspense<TData = {
         ...options?.query
     });
 }
-export interface Files_delete_api_files_delete_deleteParams {
+export interface FilesDeleteParams {
     path: string;
     is_dir?: boolean;
 }
-export const files_delete_api_files_delete_delete = async (params: Files_delete_api_files_delete_deleteParams, options?: RequestInit): Promise<{
+export const filesDelete = async (params: FilesDeleteParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const searchParams = new URLSearchParams();
@@ -632,22 +632,22 @@ export const files_delete_api_files_delete_delete = async (params: Files_delete_
         data: await res.json()
     };
 };
-export function useFiles_delete_api_files_delete_delete(options?: {
+export function useFilesDelete(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
     }, ApiError, {
-        params: Files_delete_api_files_delete_deleteParams;
+        params: FilesDeleteParams;
     }>;
 }) {
     return useMutation({
-        mutationFn: (vars)=>files_delete_api_files_delete_delete(vars.params),
+        mutationFn: (vars)=>filesDelete(vars.params),
         ...options?.mutation
     });
 }
-export interface Files_download_api_files_download_getParams {
+export interface FilesDownloadParams {
     path: string;
 }
-export const files_download_api_files_download_get = async (params: Files_download_api_files_download_getParams, options?: RequestInit): Promise<{
+export const filesDownload = async (params: FilesDownloadParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const searchParams = new URLSearchParams();
@@ -672,44 +672,44 @@ export const files_download_api_files_download_get = async (params: Files_downlo
         data: await res.json()
     };
 };
-export const files_download_api_files_download_getKey = (params?: Files_download_api_files_download_getParams)=>{
+export const filesDownloadKey = (params?: FilesDownloadParams)=>{
     return [
         "/api/files/download",
         params
     ] as const;
 };
-export function useFiles_download_api_files_download_get<TData = {
+export function useFilesDownload<TData = {
     data: unknown;
 }>(options: {
-    params: Files_download_api_files_download_getParams;
+    params: FilesDownloadParams;
     query?: Omit<UseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useQuery({
-        queryKey: files_download_api_files_download_getKey(options.params),
-        queryFn: ()=>files_download_api_files_download_get(options.params),
+        queryKey: filesDownloadKey(options.params),
+        queryFn: ()=>filesDownload(options.params),
         ...options?.query
     });
 }
-export function useFiles_download_api_files_download_getSuspense<TData = {
+export function useFilesDownloadSuspense<TData = {
     data: unknown;
 }>(options: {
-    params: Files_download_api_files_download_getParams;
+    params: FilesDownloadParams;
     query?: Omit<UseSuspenseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useSuspenseQuery({
-        queryKey: files_download_api_files_download_getKey(options.params),
-        queryFn: ()=>files_download_api_files_download_get(options.params),
+        queryKey: filesDownloadKey(options.params),
+        queryFn: ()=>filesDownload(options.params),
         ...options?.query
     });
 }
-export interface Files_list_api_files_list_getParams {
+export interface FilesListParams {
     path?: string;
 }
-export const files_list_api_files_list_get = async (params?: Files_list_api_files_list_getParams, options?: RequestInit): Promise<{
+export const filesList = async (params?: FilesListParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const searchParams = new URLSearchParams();
@@ -734,41 +734,41 @@ export const files_list_api_files_list_get = async (params?: Files_list_api_file
         data: await res.json()
     };
 };
-export const files_list_api_files_list_getKey = (params?: Files_list_api_files_list_getParams)=>{
+export const filesListKey = (params?: FilesListParams)=>{
     return [
         "/api/files/list",
         params
     ] as const;
 };
-export function useFiles_list_api_files_list_get<TData = {
+export function useFilesList<TData = {
     data: unknown;
 }>(options?: {
-    params?: Files_list_api_files_list_getParams;
+    params?: FilesListParams;
     query?: Omit<UseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useQuery({
-        queryKey: files_list_api_files_list_getKey(options?.params),
-        queryFn: ()=>files_list_api_files_list_get(options?.params),
+        queryKey: filesListKey(options?.params),
+        queryFn: ()=>filesList(options?.params),
         ...options?.query
     });
 }
-export function useFiles_list_api_files_list_getSuspense<TData = {
+export function useFilesListSuspense<TData = {
     data: unknown;
 }>(options?: {
-    params?: Files_list_api_files_list_getParams;
+    params?: FilesListParams;
     query?: Omit<UseSuspenseQueryOptions<{
         data: unknown;
     }, ApiError, TData>, "queryKey" | "queryFn">;
 }) {
     return useSuspenseQuery({
-        queryKey: files_list_api_files_list_getKey(options?.params),
-        queryFn: ()=>files_list_api_files_list_get(options?.params),
+        queryKey: filesListKey(options?.params),
+        queryFn: ()=>filesList(options?.params),
         ...options?.query
     });
 }
-export const files_mkdir_api_files_mkdir_post = async (data: MkdirRequest, options?: RequestInit): Promise<{
+export const filesMkdir = async (data: MkdirRequest, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const res = await fetch("/api/files/mkdir", {
@@ -794,17 +794,17 @@ export const files_mkdir_api_files_mkdir_post = async (data: MkdirRequest, optio
         data: await res.json()
     };
 };
-export function useFiles_mkdir_api_files_mkdir_post(options?: {
+export function useFilesMkdir(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
     }, ApiError, MkdirRequest>;
 }) {
     return useMutation({
-        mutationFn: (data)=>files_mkdir_api_files_mkdir_post(data),
+        mutationFn: (data)=>filesMkdir(data),
         ...options?.mutation
     });
 }
-export const files_upload_api_files_upload_post = async (data: FormData, options?: RequestInit): Promise<{
+export const filesUpload = async (data: FormData, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const res = await fetch("/api/files/upload", {
@@ -829,13 +829,13 @@ export const files_upload_api_files_upload_post = async (data: FormData, options
         data: await res.json()
     };
 };
-export function useFiles_upload_api_files_upload_post(options?: {
+export function useFilesUpload(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
     }, ApiError, FormData>;
 }) {
     return useMutation({
-        mutationFn: (data)=>files_upload_api_files_upload_post(data),
+        mutationFn: (data)=>filesUpload(data),
         ...options?.mutation
     });
 }

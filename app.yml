@@ -1,1 +1,9 @@
-command: ["uvicorn", "apx_deepagent_chat.backend.app:app", "--workers", "2"]
+command: ["uvicorn", "apx_deepagent_chat.backend.server:app", "--workers", "2"]
+
+env:
+  - name: MLFLOW_TRACKING_URI
+    value: "databricks"
+  - name: MLFLOW_REGISTRY_URI
+    value: "databricks-uc"
+  - name: MLFLOW_EXPERIMENT_ID
+    valueFrom: "experiment"

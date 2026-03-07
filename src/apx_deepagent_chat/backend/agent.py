@@ -14,6 +14,10 @@ from databricks_langchain import (
     DatabricksMultiServerMCPClient,
 )
 from deepagents import create_deep_agent
+from deepagents.backends import BackendProtocol, CompositeBackend, StateBackend, StoreBackend
+from deepagents.backends.protocol import EditResult, WriteResult
+from deepagents.backends.utils import create_file_data
+from langgraph.store.memory import InMemoryStore
 from langchain.agents.middleware import wrap_model_call, wrap_tool_call
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import tool as langchain_tool
@@ -37,8 +41,9 @@ mlflow.langchain.autolog()
 sp_workspace_client = WorkspaceClient()
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-MODEL = "databricks-qwen3-next-80b-a3b-instruct"
+MODEL = "databricks-gpt-oss-20b"
 ASSETS_DIR = _PROJECT_ROOT / "assets"
+
 
 # --- Module-level caches ---
 _MCP_TOOLS_TTL_SECONDS = 30 * 60  # 30 minutes
@@ -101,11 +106,11 @@ def _init_mcp_client(
                 url=f"{host_name}/api/2.0/mcp/functions/system/ai",
                 workspace_client=workspace_client,
             ),
-            DatabricksMCPServer(
-                name="dbsql",
-                url=f"{host_name}/api/2.0/mcp/sql",
-                workspace_client=workspace_client,
-            ),
+            # DatabricksMCPServer(
+            #     name="dbsql",
+            #     url=f"{host_name}/api/2.0/mcp/sql",
+            #     workspace_client=workspace_client,
+            # ),
         ]
     )
 
@@ -128,7 +133,7 @@ async def _get_mcp_tools(workspace_client: WorkspaceClient) -> list:
             return _mcp_tools_cache
         mcp_client = _init_mcp_client(workspace_client)
         tools = await mcp_client.get_tools()
-        tools = [t for t in tools if t.name != "execute_sql"]
+        # tools = [t for t in tools if t.name != "execute_sql"]
         _mcp_tools_cache = tools
         _mcp_tools_cached_at = time.monotonic()
         return tools
@@ -247,7 +252,7 @@ def get_current_time(timezone: str = "Asia/Tokyo") -> str:
     return now.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
-# @functools.cache
+@functools.cache
 def _load_subagents(config_path: Path) -> list:
     """Load subagent definitions from YAML and wire up tools (cached)."""
     available_tools = {
@@ -291,17 +296,49 @@ def _load_system_prompt(prompt_path: Path) -> str:
     """Load system prompt from file (cached)."""
     return prompt_path.read_text()
 
+@functools.cache
+def _load_preset_files() -> dict[str, Any]:
+    """assets/ ディレクトリのファイルデータをキャッシュして返す。"""
+
+    files: dict[str, Any] = {}
+
+    # assets/AGENTS.md -> /AGENTS.md (CompositeBackend が /preset/ を除去して渡すキー)
+    agents_md_path = ASSETS_DIR / "AGENTS.md"
+    if agents_md_path.exists():
+        files["/AGENTS.md"] = create_file_data(agents_md_path.read_text())
+
+    # assets/skills/** -> /skills/**
+    skills_dir = ASSETS_DIR / "skills"
+    if skills_dir.exists():
+        for file_path in skills_dir.rglob("*"):
+            if file_path.is_file():
+                rel = file_path.relative_to(ASSETS_DIR)
+                files[f"/{rel}"] = create_file_data(file_path.read_text())
+
+    return files
+
+
+def _init_preset_store() -> InMemoryStore:
+    """キャッシュ済みファイルデータから新しい InMemoryStore を構築して返す。"""
+    store = InMemoryStore()
+    for key, value in _load_preset_files().items():
+        store.put(namespace=("filesystem",), key=key, value=value)
+    return store
+
 
 def _build_subagents(
     mcp_tools: list,
     volume_path: str,
     workspace_client: Optional[WorkspaceClient] = None,
+    override_model=None,
 ) -> list:
     """Load subagent definitions from YAML and inject dynamic tools."""
     ws_client = workspace_client or sp_workspace_client
 
     subagents = _load_subagents(ASSETS_DIR / "subagents.yaml")
     for sa in subagents:
+        if override_model and "model" in sa:
+            sa["model"] = override_model
         if sa.get("_pending_mcp_tools"):
             sa["tools"] = mcp_tools + sa.get("tools", [])
             existing = [
@@ -316,6 +353,7 @@ async def init_agent(
     workspace_client: Optional[WorkspaceClient] = None,
     checkpointer=None,
     volume_path: Optional[str] = None,
+    override_model=None,
 ):
     ws_client = workspace_client or sp_workspace_client
     if not volume_path:
@@ -323,37 +361,29 @@ async def init_agent(
 
     mcp_tools = await _get_mcp_tools(ws_client)
 
-    @langchain_tool
-    def get_volume_browser_url(file_path: str) -> str:
-        """UC Volume上のファイルが格納されているディレクトリのブラウザURLを生成します。ファイルの場所をユーザに案内したい場合に使用してください。
-
-        Args:
-            file_path: 対象ファイルの仮想パス (例: "/report.csv")。
-        """
-        from pathlib import PurePosixPath
-        from urllib.parse import quote
-
-        from .agent_utils import to_real_path
-
-        real_path = to_real_path(volume_path, file_path)
-        parent_dir = str(PurePosixPath(real_path).parent)
-        if not parent_dir.endswith("/"):
-            parent_dir += "/"
-        parts = volume_path.strip("/").split(
-            "/"
-        )  # ["Volumes", catalog, schema, volume]
-        catalog, schema, volume_name = parts[1], parts[2], parts[3]
-        host = ws_client.config.host.rstrip("/")
-        volume_path_param = quote(parent_dir, safe="")
-        return (
-            f"{host}/explore/data/volumes/{catalog}/{schema}/{volume_name}"
-            f"?volumePath={volume_path_param}"
-        )
-
     subagents = _build_subagents(
         mcp_tools=mcp_tools,
         volume_path=volume_path,
         workspace_client=ws_client,
+        override_model=override_model,
+    )
+
+    model = override_model or ChatDatabricks(
+        endpoint=MODEL,
+        workspace_client=ws_client,
+        temperature=0,
+        use_responses_api=False,
+    )
+
+    preset_store = _init_preset_store()
+    backend = lambda rt: CompositeBackend(
+        default=UCVolumesBackend(
+            volume_path=volume_path,
+            workspace_client=ws_client,
+        ),
+        routes={
+            "/preset/": StoreBackend(rt),
+        },
     )
 
     return create_deep_agent(
@@ -361,22 +391,14 @@ async def init_agent(
         + [
             web_search,
             web_fetch,
-            get_volume_browser_url,
             get_current_time,
         ],
         system_prompt=_load_system_prompt(ASSETS_DIR / "system_prompt.md"),
-        memory=["AGENTS.md", "memories/instructions.md"],
-        skills=["skills/"],
-        model=ChatDatabricks(
-            endpoint=MODEL,
-            workspace_client=ws_client,
-            temperature=0,
-            use_responses_api=False,
-        ),
-        backend=UCVolumesBackend(
-            volume_path=volume_path,
-            workspace_client=ws_client,
-        ),
+        memory=["/preset/AGENTS.md", "memories/instructions.md"],
+        skills=["/preset/skills/", "skills/"],
+        model=model,
+        backend=backend,
+        store=preset_store,
         subagents=subagents,
         checkpointer=checkpointer,
         middleware=[strip_content_block_ids, flatten_system_message],

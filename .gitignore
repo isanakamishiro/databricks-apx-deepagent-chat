@@ -234,3 +234,4 @@ src/myapp/__dist__/
 **/bun.lock
 screenshots/
 mlflow.db
+.github/

@@ -1,5 +1,5 @@
 import logging
-from typing import Any, AsyncGenerator, AsyncIterator, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Iterator, Optional
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
@@ -67,6 +67,32 @@ def get_databricks_host_from_env() -> Optional[str]:
         return None
 
 
+def _log_and_yield(item: ResponsesAgentStreamEvent) -> ResponsesAgentStreamEvent:
+    logger.debug("[yield] type=%s data=%s", item.type, item.model_dump())
+    return item
+
+
+def _accumulate_usage(usage_accumulator: dict, msg) -> None:
+    """AIMessage/AIMessageChunk の usage_metadata をアキュムレータに加算する."""
+    um = getattr(msg, "usage_metadata", None)
+    if not um:
+        return
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
+        val = um.get(key, 0) if isinstance(um, dict) else getattr(um, key, 0)
+        usage_accumulator[key] = usage_accumulator.get(key, 0) + val
+
+
+def _iter_output_items(
+    msgs: list, output_items: list
+) -> Iterator[ResponsesAgentStreamEvent]:
+    """msgs を output_to_responses_items_stream に通し、done items を集約しながら yield する."""
+    for item in output_to_responses_items_stream(msgs):  # type: ignore[arg-type]
+        if item.type == "response.output_item.done":
+            if (i := getattr(item, "item", None)) is not None:
+                output_items.append(i)
+        yield _log_and_yield(item)
+
+
 async def process_agent_astream_events(
     async_stream: AsyncIterator[Any],
     usage_accumulator: dict[str, int] | None = None,
@@ -77,7 +103,7 @@ async def process_agent_astream_events(
     Generic helper to process agent stream events and yield ResponsesAgentStreamEvent objects.
 
     サブエージェント (namespace != ()) の場合:
-      - messages モード: lc_agent_name から名前を検出し <name> マーカーを emit、トークンはスキップ
+      - messages モード: lc_agent_name から名前を検出し subagent.start イベントを emit、トークンはスキップ
       - updates モード: ツール呼び出し・完了メッセージを yield
     メインエージェント (namespace == ()) の場合:
       - messages / updates とも通常通り yield
@@ -99,45 +125,7 @@ async def process_agent_astream_events(
     _accumulated_text: str = ""
     _text_item_id: str | None = None
     _all_output_items: list[dict[str, Any]] = []
-
-    def _log_and_yield(item: ResponsesAgentStreamEvent) -> ResponsesAgentStreamEvent:
-        logger.debug("[yield] type=%s data=%s", item.type, item.model_dump())
-        return item
-
-    def _accumulate_usage(msg):
-        """AIMessage/AIMessageChunk の usage_metadata をアキュムレータに加算する."""
-        if usage_accumulator is None:
-            return
-        um = getattr(msg, "usage_metadata", None)
-        if not um:
-            return
-        if isinstance(um, dict):
-            usage_accumulator["input_tokens"] = usage_accumulator.get(
-                "input_tokens", 0
-            ) + um.get("input_tokens", 0)
-            usage_accumulator["output_tokens"] = usage_accumulator.get(
-                "output_tokens", 0
-            ) + um.get("output_tokens", 0)
-            usage_accumulator["total_tokens"] = usage_accumulator.get(
-                "total_tokens", 0
-            ) + um.get("total_tokens", 0)
-        else:
-            usage_accumulator["input_tokens"] = usage_accumulator.get(
-                "input_tokens", 0
-            ) + getattr(um, "input_tokens", 0)
-            usage_accumulator["output_tokens"] = usage_accumulator.get(
-                "output_tokens", 0
-            ) + getattr(um, "output_tokens", 0)
-            usage_accumulator["total_tokens"] = usage_accumulator.get(
-                "total_tokens", 0
-            ) + getattr(um, "total_tokens", 0)
-
-    def _collect_output_items(stream_event: ResponsesAgentStreamEvent):
-        """response.output_item.done イベントの item を集約リストに追加する."""
-        if stream_event.type == "response.output_item.done":
-            item = getattr(stream_event, "item", None)
-            if item is not None:
-                _all_output_items.append(item)
+    _ua = usage_accumulator if usage_accumulator is not None else {}
 
     async for event in async_stream:
         # subgraphs=True: event is a 3-tuple (namespace, mode, data)
@@ -149,7 +137,7 @@ async def process_agent_astream_events(
             if mode == "messages":
                 # トークンストリーミングはスキップ、名前検出のみ
                 try:
-                    _unused_token, metadata = data
+                    _, metadata = data
                     agent_name = metadata.get("lc_agent_name")
                     if agent_name and agent_name != _current_agent_name:
                         _current_agent_name = agent_name
@@ -175,21 +163,16 @@ async def process_agent_astream_events(
                             ):
                                 msg.content = json.dumps(msg.content)
                             if isinstance(msg, (AIMessage, AIMessageChunk)):
-                                _accumulate_usage(msg)
-                        for item in output_to_responses_items_stream(
-                            node_data["messages"]
-                        ):
-                            _collect_output_items(item)
-                            yield _log_and_yield(item)
+                                _accumulate_usage(_ua, msg)
+                        for item in _iter_output_items(node_data["messages"], _all_output_items):
+                            yield item
                 continue
 
         # --- メインエージェントのイベント ---
         if _current_agent_name is not None:
             yield _log_and_yield(ResponsesAgentStreamEvent(
-                **create_text_delta(
-                    delta="</subagent>",
-                    item_id=f"subagent-end-{id(event)}",
-                )
+                type="subagent.end",
+                name=_current_agent_name,  # type: ignore[call-arg]
             ))
             _current_agent_name = None
 
@@ -207,7 +190,7 @@ async def process_agent_astream_events(
                     filtered_msgs = []
                     for msg in node_data["messages"]:
                         if isinstance(msg, (AIMessage, AIMessageChunk)):
-                            _accumulate_usage(msg)
+                            _accumulate_usage(_ua, msg)
                         if isinstance(msg, ToolMessage):
                             if not isinstance(msg.content, str):
                                 msg.content = json.dumps(msg.content)
@@ -222,9 +205,8 @@ async def process_agent_astream_events(
                                 )
                                 filtered_msgs.append(stripped)
                     if filtered_msgs:
-                        for item in output_to_responses_items_stream(filtered_msgs):  # type: ignore[arg-type]
-                            _collect_output_items(item)
-                            yield _log_and_yield(item)
+                        for item in _iter_output_items(filtered_msgs, _all_output_items):
+                            yield item
         elif mode == "messages":
             try:
                 chunk = data[0]
@@ -253,7 +235,6 @@ async def process_agent_astream_events(
         ))
 
     # response.completed を emit（mlflow 準拠の type）
-    _ua = usage_accumulator or {}
     _total = _ua.get("total_tokens", 0)
     _output = _ua.get("output_tokens", 0)
     usage_data: dict[str, Any] = {
@@ -279,13 +260,6 @@ async def process_agent_astream_events(
         response=response_data,  # type: ignore[call-arg]
     ))
 
-    # responses.completed を emit（BFF の @databricks/ai-sdk-provider 用）
-    # プロバイダーは "responses.completed" から usage を取得し streamText の
-    # onFinish → data-usage としてフロントエンドに伝播する。
-    yield _log_and_yield(ResponsesAgentStreamEvent(
-        type="responses.completed",
-        response=response_data,  # type: ignore[call-arg]
-    ))
 
 
 def to_real_path(volume_path: str, virtual_path: str) -> str:
