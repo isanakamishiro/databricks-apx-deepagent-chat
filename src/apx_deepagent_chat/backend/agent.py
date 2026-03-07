@@ -42,6 +42,7 @@ sp_workspace_client = WorkspaceClient()
 
 MODEL = "databricks-qwen3-next-80b-a3b-instruct"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
+_TEXT_SUFFIXES = {".md", ".py", ".txt"}
 
 
 # --- Module-level caches ---
@@ -309,7 +310,6 @@ def _load_preset_files() -> dict[str, Any]:
     # assets/skills/** -> /skills/**
     skills_dir = ASSETS_DIR / "skills"
     if skills_dir.exists():
-        _TEXT_SUFFIXES = {".md", ".py", ".txt"}
         for file_path in skills_dir.rglob("*"):
             if file_path.is_file() and file_path.suffix in _TEXT_SUFFIXES:
                 rel = file_path.relative_to(ASSETS_DIR)
