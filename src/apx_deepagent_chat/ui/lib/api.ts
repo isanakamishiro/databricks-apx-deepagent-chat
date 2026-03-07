@@ -159,6 +159,12 @@ export interface ListChatsParams {
     user_id: string;
     limit?: number;
     ending_before?: string | null;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
 }
 export const listChats = async (params: ListChatsParams, options?: RequestInit): Promise<{
     data: unknown;
@@ -171,7 +177,28 @@ export const listChats = async (params: ListChatsParams, options?: RequestInit):
     const url = queryString ? `/api/chat-history?${queryString}` : "/api/chat-history";
     const res = await fetch(url, {
         ...options,
-        method: "GET"
+        method: "GET",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
     });
     if (!res.ok) {
         const body = await res.text();
@@ -221,7 +248,15 @@ export function useListChatsSuspense<TData = {
         ...options?.query
     });
 }
-export const saveChat = async (data: SaveChatRequest, options?: RequestInit): Promise<{
+export interface SaveChatParams {
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const saveChat = async (data: SaveChatRequest, params?: SaveChatParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const res = await fetch("/api/chat-history", {
@@ -229,6 +264,24 @@ export const saveChat = async (data: SaveChatRequest, options?: RequestInit): Pr
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
             ...options?.headers
         },
         body: JSON.stringify(data)
@@ -250,16 +303,25 @@ export const saveChat = async (data: SaveChatRequest, options?: RequestInit): Pr
 export function useSaveChat(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
-    }, ApiError, SaveChatRequest>;
+    }, ApiError, {
+        params: SaveChatParams;
+        data: SaveChatRequest;
+    }>;
 }) {
     return useMutation({
-        mutationFn: (data)=>saveChat(data),
+        mutationFn: (vars)=>saveChat(vars.data, vars.params),
         ...options?.mutation
     });
 }
 export interface GetChatParams {
     chat_id: string;
     user_id: string;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
 }
 export const getChat = async (params: GetChatParams, options?: RequestInit): Promise<{
     data: unknown;
@@ -270,7 +332,28 @@ export const getChat = async (params: GetChatParams, options?: RequestInit): Pro
     const url = queryString ? `/api/chat-history/${params.chat_id}?${queryString}` : `/api/chat-history/${params.chat_id}`;
     const res = await fetch(url, {
         ...options,
-        method: "GET"
+        method: "GET",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
     });
     if (!res.ok) {
         const body = await res.text();
@@ -323,6 +406,12 @@ export function useGetChatSuspense<TData = {
 export interface DeleteChatParams {
     chat_id: string;
     user_id: string;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
 }
 export const deleteChat = async (params: DeleteChatParams, options?: RequestInit): Promise<{
     data: unknown;
@@ -333,7 +422,28 @@ export const deleteChat = async (params: DeleteChatParams, options?: RequestInit
     const url = queryString ? `/api/chat-history/${params.chat_id}?${queryString}` : `/api/chat-history/${params.chat_id}`;
     const res = await fetch(url, {
         ...options,
-        method: "DELETE"
+        method: "DELETE",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
     });
     if (!res.ok) {
         const body = await res.text();
@@ -364,6 +474,12 @@ export function useDeleteChat(options?: {
 export interface GetMessagesParams {
     chat_id: string;
     user_id: string;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
 }
 export const getMessages = async (params: GetMessagesParams, options?: RequestInit): Promise<{
     data: unknown;
@@ -374,7 +490,28 @@ export const getMessages = async (params: GetMessagesParams, options?: RequestIn
     const url = queryString ? `/api/chat-history/${params.chat_id}/messages?${queryString}` : `/api/chat-history/${params.chat_id}/messages`;
     const res = await fetch(url, {
         ...options,
-        method: "GET"
+        method: "GET",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
     });
     if (!res.ok) {
         const body = await res.text();
@@ -426,6 +563,12 @@ export function useGetMessagesSuspense<TData = {
 }
 export interface SaveMessagesParams {
     chat_id: string;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
 }
 export const saveMessages = async (params: SaveMessagesParams, data: SaveMessagesRequest, options?: RequestInit): Promise<{
     data: unknown;
@@ -435,6 +578,24 @@ export const saveMessages = async (params: SaveMessagesParams, data: SaveMessage
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
             ...options?.headers
         },
         body: JSON.stringify(data)
@@ -605,6 +766,12 @@ export function useCurrentUserSuspense<TData = {
 export interface FilesDeleteParams {
     path: string;
     is_dir?: boolean;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
 }
 export const filesDelete = async (params: FilesDeleteParams, options?: RequestInit): Promise<{
     data: unknown;
@@ -616,7 +783,28 @@ export const filesDelete = async (params: FilesDeleteParams, options?: RequestIn
     const url = queryString ? `/api/files/delete?${queryString}` : "/api/files/delete";
     const res = await fetch(url, {
         ...options,
-        method: "DELETE"
+        method: "DELETE",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
     });
     if (!res.ok) {
         const body = await res.text();
@@ -646,6 +834,12 @@ export function useFilesDelete(options?: {
 }
 export interface FilesDownloadParams {
     path: string;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
 }
 export const filesDownload = async (params: FilesDownloadParams, options?: RequestInit): Promise<{
     data: unknown;
@@ -656,7 +850,28 @@ export const filesDownload = async (params: FilesDownloadParams, options?: Reque
     const url = queryString ? `/api/files/download?${queryString}` : "/api/files/download";
     const res = await fetch(url, {
         ...options,
-        method: "GET"
+        method: "GET",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
     });
     if (!res.ok) {
         const body = await res.text();
@@ -708,6 +923,12 @@ export function useFilesDownloadSuspense<TData = {
 }
 export interface FilesListParams {
     path?: string;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
 }
 export const filesList = async (params?: FilesListParams, options?: RequestInit): Promise<{
     data: unknown;
@@ -718,7 +939,28 @@ export const filesList = async (params?: FilesListParams, options?: RequestInit)
     const url = queryString ? `/api/files/list?${queryString}` : "/api/files/list";
     const res = await fetch(url, {
         ...options,
-        method: "GET"
+        method: "GET",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
     });
     if (!res.ok) {
         const body = await res.text();
@@ -768,7 +1010,15 @@ export function useFilesListSuspense<TData = {
         ...options?.query
     });
 }
-export const filesMkdir = async (data: MkdirRequest, options?: RequestInit): Promise<{
+export interface FilesMkdirParams {
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const filesMkdir = async (data: MkdirRequest, params?: FilesMkdirParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const res = await fetch("/api/files/mkdir", {
@@ -776,6 +1026,24 @@ export const filesMkdir = async (data: MkdirRequest, options?: RequestInit): Pro
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
             ...options?.headers
         },
         body: JSON.stringify(data)
@@ -797,20 +1065,49 @@ export const filesMkdir = async (data: MkdirRequest, options?: RequestInit): Pro
 export function useFilesMkdir(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
-    }, ApiError, MkdirRequest>;
+    }, ApiError, {
+        params: FilesMkdirParams;
+        data: MkdirRequest;
+    }>;
 }) {
     return useMutation({
-        mutationFn: (data)=>filesMkdir(data),
+        mutationFn: (vars)=>filesMkdir(vars.data, vars.params),
         ...options?.mutation
     });
 }
-export const filesUpload = async (data: FormData, options?: RequestInit): Promise<{
+export interface FilesUploadParams {
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const filesUpload = async (data: FormData, params?: FilesUploadParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const res = await fetch("/api/files/upload", {
         ...options,
         method: "POST",
         headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
             ...options?.headers
         },
         body: data
@@ -832,10 +1129,13 @@ export const filesUpload = async (data: FormData, options?: RequestInit): Promis
 export function useFilesUpload(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
-    }, ApiError, FormData>;
+    }, ApiError, {
+        params: FilesUploadParams;
+        data: FormData;
+    }>;
 }) {
     return useMutation({
-        mutationFn: (data)=>filesUpload(data),
+        mutationFn: (vars)=>filesUpload(vars.data, vars.params),
         ...options?.mutation
     });
 }

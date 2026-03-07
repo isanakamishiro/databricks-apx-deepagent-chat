@@ -15,7 +15,7 @@ from mlflow.genai.agent_server import AgentServer, setup_mlflow_git_based_versio
 from . import agent  # noqa: F401
 
 
-logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.DEBUG)
+logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
 # AgentServer provides /invocations and /responses endpoints
 agent_server = AgentServer("ResponsesAgent")
