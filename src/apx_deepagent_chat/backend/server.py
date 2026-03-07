@@ -20,7 +20,10 @@ logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 # AgentServer provides /invocations and /responses endpoints
 agent_server = AgentServer("ResponsesAgent")
 app = agent_server.app
-setup_mlflow_git_based_version_tracking()
+
+# Optionally, set up MLflow git-based version tracking
+# to correspond your agent's traces to a specific git commit
+# setup_mlflow_git_based_version_tracking()
 
 
 @app.on_event("startup")
