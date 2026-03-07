@@ -1,5 +1,6 @@
 import json
 import logging
+from dataclasses import dataclass, field
 from functools import cache
 from typing import Any, AsyncGenerator, AsyncIterator, Iterator, Optional
 from uuid import uuid4
@@ -52,6 +53,11 @@ def _extract_text_content(content) -> str:
 
 
 def get_user_workspace_client() -> WorkspaceClient:
+    """リクエストヘッダーのアクセストークンを使ってユーザー認証済み WorkspaceClient を返す.
+
+    OBO (On-Behalf-Of) トークンが存在する場合は PAT 認証で初期化し、
+    存在しない場合はデフォルトの WorkspaceClient を返す。
+    """
     token = get_request_headers().get("x-forwarded-access-token")
     if not token:
         return WorkspaceClient()
@@ -61,6 +67,11 @@ def get_user_workspace_client() -> WorkspaceClient:
 
 @cache
 def get_databricks_host_from_env() -> Optional[str]:
+    """環境変数から Databricks ホスト URL を取得して返す.
+
+    結果はキャッシュされるため、WorkspaceClient の初期化は初回のみ実行される。
+    取得に失敗した場合は None を返す。
+    """
     try:
         w = WorkspaceClient()
         return w.config.host
@@ -70,6 +81,7 @@ def get_databricks_host_from_env() -> Optional[str]:
 
 
 def _log_and_yield(item: ResponsesAgentStreamEvent) -> ResponsesAgentStreamEvent:
+    """イベントをデバッグログに記録してそのまま返す."""
     logger.debug("[yield] type=%s data=%s", item.type, item.model_dump())
     return item
 
@@ -93,6 +105,155 @@ def _iter_output_items(
             if (i := getattr(item, "item", None)) is not None:
                 output_items.append(i)
         yield _log_and_yield(item)
+
+
+@dataclass
+class _StreamState:
+    """process_agent_astream_events のストリーム処理中の状態を保持する."""
+
+    accumulated_text: str = ""
+    text_item_id: str | None = None
+    current_agent_name: str | None = None
+    output_items: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _process_subagent_messages(
+    data: Any, state: _StreamState
+) -> Iterator[ResponsesAgentStreamEvent]:
+    """サブエージェントの messages イベントを処理する.
+
+    lc_agent_name を検出して state.current_agent_name を更新し、
+    名前が変わった場合のみ subagent.start イベントを yield する。
+    """
+    try:
+        _, metadata = data
+        agent_name = metadata.get("lc_agent_name")
+        if agent_name and agent_name != state.current_agent_name:
+            state.current_agent_name = agent_name
+            yield _log_and_yield(ResponsesAgentStreamEvent(
+                type="subagent.start",
+                name=agent_name,  # type: ignore[call-arg]
+            ))
+    except Exception as e:
+        logger.exception(f"Error extracting subagent name: {e}")
+
+
+def _process_subagent_updates(
+    data: Any, ua: dict, output_items: list
+) -> Iterator[ResponsesAgentStreamEvent]:
+    """サブエージェントの updates イベントを処理する.
+
+    ToolMessage の content を JSON 文字列化し、AIMessage/AIMessageChunk の
+    usage を accumulate して、_iter_output_items に通して yield する。
+    """
+    for node_data in data.values():
+        if not node_data:
+            continue
+        if node_data.get("messages") and isinstance(node_data.get("messages"), list):
+            for msg in node_data["messages"]:
+                if isinstance(msg, ToolMessage) and not isinstance(msg.content, str):
+                    msg.content = json.dumps(msg.content)
+                if isinstance(msg, (AIMessage, AIMessageChunk)):
+                    _accumulate_usage(ua, msg)
+            yield from _iter_output_items(node_data["messages"], output_items)
+
+
+def _process_main_agent_updates(
+    data: Any, ua: dict, output_items: list
+) -> Iterator[ResponsesAgentStreamEvent]:
+    """メインエージェントの updates イベントを処理する.
+
+    テキストは messages モードでストリーミング済みなので除外し二重表示を防ぐ。
+    ToolMessage（ツール結果）と tool_calls 付き AIMessage（ツール呼び出し表示用）
+    のみ yield する。
+    """
+    for node_data in data.values():
+        if not node_data:
+            continue
+        if node_data.get("messages") and isinstance(node_data.get("messages"), list):
+            filtered_msgs = []
+            for msg in node_data["messages"]:
+                if isinstance(msg, (AIMessage, AIMessageChunk)):
+                    _accumulate_usage(ua, msg)
+                if isinstance(msg, ToolMessage):
+                    if not isinstance(msg.content, str):
+                        msg.content = json.dumps(msg.content)
+                    filtered_msgs.append(msg)
+                elif isinstance(msg, (AIMessage, AIMessageChunk)):
+                    if getattr(msg, "tool_calls", None):
+                        # テキストを除去し tool_calls のみ保持
+                        stripped = AIMessage(
+                            content="",
+                            tool_calls=msg.tool_calls,
+                            id=msg.id,
+                        )
+                        filtered_msgs.append(stripped)
+            if filtered_msgs:
+                yield from _iter_output_items(filtered_msgs, output_items)
+
+
+def _process_main_agent_messages(
+    data: Any, state: _StreamState
+) -> Iterator[ResponsesAgentStreamEvent]:
+    """メインエージェントの messages イベントを処理する.
+
+    AIMessageChunk のテキストトークンを抽出して yield し、
+    state.accumulated_text と state.text_item_id を更新する。
+    """
+    try:
+        chunk = data[0]
+        if isinstance(chunk, AIMessageChunk) and (content := chunk.content):
+            text = _extract_text_content(content)
+            if text:
+                state.accumulated_text += text
+                state.text_item_id = chunk.id
+                yield _log_and_yield(ResponsesAgentStreamEvent(
+                    **create_text_delta(delta=text, item_id=chunk.id)
+                ))
+    except Exception as e:
+        logger.exception(f"Error processing agent stream event: {e}")
+
+
+def _finalize_stream(
+    state: _StreamState,
+    ua: dict,
+    model: str | None,
+    max_context_tokens: int | None,
+) -> Iterator[ResponsesAgentStreamEvent]:
+    """ストリーム完了後の response.output_item.done と response.completed を emit する."""
+    if state.accumulated_text:
+        text_output_item = create_text_output_item(
+            state.accumulated_text, state.text_item_id or str(uuid4())
+        )
+        state.output_items.append(text_output_item)
+        yield _log_and_yield(ResponsesAgentStreamEvent(
+            type="response.output_item.done", item=text_output_item  # type: ignore[call-arg]
+        ))
+
+    _total = ua.get("total_tokens", 0)
+    _output = ua.get("output_tokens", 0)
+    usage_data: dict[str, Any] = {
+        "input_tokens": _total - _output,
+        "output_tokens": _output,
+        "total_tokens": _total,
+        "input_tokens_details": {"cached_tokens": 0},
+        "output_tokens_details": {"reasoning_tokens": 0},
+    }
+    response_data: dict[str, Any] = {
+        "id": f"resp-{str(uuid4())[:8]}",
+        "status": "completed",
+        "output": state.output_items,
+        "usage": usage_data,
+    }
+    if model is not None:
+        response_data["model"] = model
+    if max_context_tokens is not None:
+        response_data["max_context_tokens"] = max_context_tokens
+
+    yield _log_and_yield(ResponsesAgentStreamEvent(
+        type="response.completed",
+        response=response_data,  # type: ignore[call-arg]
+    ))
 
 
 async def process_agent_astream_events(
@@ -123,10 +284,7 @@ async def process_agent_astream_events(
         max_context_tokens: Optional max context window size to include in
             the response.completed event.
     """
-    _current_agent_name: str | None = None
-    _accumulated_text: str = ""
-    _text_item_id: str | None = None
-    _all_output_items: list[dict[str, Any]] = []
+    state = _StreamState()
     _ua = usage_accumulator if usage_accumulator is not None else {}
 
     async for event in async_stream:
@@ -137,130 +295,32 @@ async def process_agent_astream_events(
         if _ns != ():
             # --- サブエージェントのイベント ---
             if mode == "messages":
-                # トークンストリーミングはスキップ、名前検出のみ
-                try:
-                    _, metadata = data
-                    agent_name = metadata.get("lc_agent_name")
-                    if agent_name and agent_name != _current_agent_name:
-                        _current_agent_name = agent_name
-                        yield _log_and_yield(ResponsesAgentStreamEvent(
-                            type="subagent.start",
-                            name=agent_name,  # type: ignore[call-arg]
-                        ))
-                except Exception as e:
-                    logger.exception(f"Error extracting subagent name: {e}")
-                continue
-
-            if mode == "updates":
-                # サブエージェントの updates は yield（ツール呼び出し・結果）
-                for node_data in data.values():
-                    if not node_data:
-                        continue
-                    if node_data.get("messages") and isinstance(
-                        node_data.get("messages"), list
-                    ):
-                        for msg in node_data["messages"]:
-                            if isinstance(msg, ToolMessage) and not isinstance(
-                                msg.content, str
-                            ):
-                                msg.content = json.dumps(msg.content)
-                            if isinstance(msg, (AIMessage, AIMessageChunk)):
-                                _accumulate_usage(_ua, msg)
-                        for item in _iter_output_items(node_data["messages"], _all_output_items):
-                            yield item
-                continue
+                for item in _process_subagent_messages(data, state):
+                    yield item
+            elif mode == "updates":
+                for item in _process_subagent_updates(data, _ua, state.output_items):
+                    yield item
+            continue
 
         # --- メインエージェントのイベント ---
-        if _current_agent_name is not None:
+        if state.current_agent_name is not None:
             yield _log_and_yield(ResponsesAgentStreamEvent(
                 type="subagent.end",
-                name=_current_agent_name,  # type: ignore[call-arg]
+                name=state.current_agent_name,  # type: ignore[call-arg]
             ))
-            _current_agent_name = None
+            state.current_agent_name = None
 
         if mode == "updates":
-            for node_data in data.values():
-                if not node_data:
-                    continue
-                if node_data.get("messages") and isinstance(
-                    node_data.get("messages"), list
-                ):
-                    # メインエージェントの updates では、テキストは "messages"
-                    # モードでストリーミング済みなので除外し二重表示を防ぐ。
-                    # ToolMessage（ツール結果）と tool_calls 付き AIMessage
-                    # （ツール呼び出し表示用）のみ yield する。
-                    filtered_msgs = []
-                    for msg in node_data["messages"]:
-                        if isinstance(msg, (AIMessage, AIMessageChunk)):
-                            _accumulate_usage(_ua, msg)
-                        if isinstance(msg, ToolMessage):
-                            if not isinstance(msg.content, str):
-                                msg.content = json.dumps(msg.content)
-                            filtered_msgs.append(msg)
-                        elif isinstance(msg, (AIMessage, AIMessageChunk)):
-                            if getattr(msg, "tool_calls", None):
-                                # テキストを除去し tool_calls のみ保持
-                                stripped = AIMessage(
-                                    content="",
-                                    tool_calls=msg.tool_calls,
-                                    id=msg.id,
-                                )
-                                filtered_msgs.append(stripped)
-                    if filtered_msgs:
-                        for item in _iter_output_items(filtered_msgs, _all_output_items):
-                            yield item
+            for item in _process_main_agent_updates(data, _ua, state.output_items):
+                yield item
         elif mode == "messages":
-            try:
-                chunk = data[0]
-                if isinstance(chunk, AIMessageChunk) and (content := chunk.content):
-                    text = _extract_text_content(content)
-                    if text:
-                        _accumulated_text += text
-                        _text_item_id = chunk.id
-                        yield _log_and_yield(ResponsesAgentStreamEvent(
-                            **create_text_delta(delta=text, item_id=chunk.id)
-                        ))
-            except Exception as e:
-                logger.exception(f"Error processing agent stream event: {e}")
+            for item in _process_main_agent_messages(data, state):
+                yield item
 
     # --- ストリーム完了後 ---
-    logger.debug("[stream] completed. accumulated_text_len=%d output_items=%d", len(_accumulated_text), len(_all_output_items))
-
-    # 集約テキストの response.output_item.done を emit
-    if _accumulated_text:
-        text_output_item = create_text_output_item(
-            _accumulated_text, _text_item_id or str(uuid4())
-        )
-        _all_output_items.append(text_output_item)
-        yield _log_and_yield(ResponsesAgentStreamEvent(
-            type="response.output_item.done", item=text_output_item  # type: ignore[call-arg]
-        ))
-
-    # response.completed を emit（mlflow 準拠の type）
-    _total = _ua.get("total_tokens", 0)
-    _output = _ua.get("output_tokens", 0)
-    usage_data: dict[str, Any] = {
-        "input_tokens": _total - _output,
-        "output_tokens": _output,
-        "total_tokens": _total,
-        "input_tokens_details": {"cached_tokens": 0},
-        "output_tokens_details": {"reasoning_tokens": 0},
-    }
-    response_data: dict[str, Any] = {
-        "id": f"resp-{str(uuid4())[:8]}",
-        "status": "completed",
-        "output": _all_output_items,
-        "usage": usage_data,
-    }
-    if model is not None:
-        response_data["model"] = model
-    if max_context_tokens is not None:
-        response_data["max_context_tokens"] = max_context_tokens
-
-    yield _log_and_yield(ResponsesAgentStreamEvent(
-        type="response.completed",
-        response=response_data,  # type: ignore[call-arg]
-    ))
+    logger.debug("[stream] completed. accumulated_text_len=%d output_items=%d", len(state.accumulated_text), len(state.output_items))
+    for item in _finalize_stream(state, _ua, model, max_context_tokens):
+        yield item
 
 
 
