@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..agent_utils import to_real_path, to_virtual_path
+from ..core import Dependencies
 
 router = APIRouter()
 
@@ -40,13 +41,12 @@ class MkdirRequest(BaseModel):
 
 
 @router.get("/files/list", operation_id="filesList")
-async def files_list(request: Request, path: str = Query("/")):
+async def files_list(request: Request, ws: Dependencies.UserClient, path: str = Query("/")):
     volume_path = _extract_volume_path(request)
     real_path = to_real_path(volume_path, path)
-    w = WorkspaceClient()
 
     try:
-        entries = list(w.files.list_directory_contents(real_path))
+        entries = list(ws.files.list_directory_contents(real_path))
     except (NotFound, ResourceDoesNotExist):
         raise HTTPException(status_code=404, detail="Directory not found")
 
@@ -75,13 +75,12 @@ async def files_list(request: Request, path: str = Query("/")):
 
 
 @router.get("/files/download", operation_id="filesDownload")
-async def files_download(request: Request, path: str = Query(...)):
+async def files_download(request: Request, ws: Dependencies.UserClient, path: str = Query(...)):
     volume_path = _extract_volume_path(request)
     real_path = to_real_path(volume_path, path)
-    w = WorkspaceClient()
 
     try:
-        resp = w.files.download(real_path)
+        resp = ws.files.download(real_path)
     except (NotFound, ResourceDoesNotExist):
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -108,6 +107,7 @@ async def files_download(request: Request, path: str = Query(...)):
 @router.post("/files/upload", operation_id="filesUpload")
 async def files_upload(
     request: Request,
+    ws: Dependencies.UserClient,
     path: str = Form(...),
     file: UploadFile = File(...),
 ):
@@ -115,11 +115,10 @@ async def files_upload(
     upload_dir = path if path.endswith("/") else path + "/"
     virtual_path = upload_dir + (file.filename or "upload")
     real_path = to_real_path(volume_path, virtual_path)
-    w = WorkspaceClient()
 
     content = await file.read()
     try:
-        w.files.upload(real_path, io.BytesIO(content), overwrite=True)
+        ws.files.upload(real_path, io.BytesIO(content), overwrite=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
@@ -127,13 +126,12 @@ async def files_upload(
 
 
 @router.post("/files/mkdir", operation_id="filesMkdir")
-async def files_mkdir(body: MkdirRequest, request: Request):
+async def files_mkdir(body: MkdirRequest, request: Request, ws: Dependencies.UserClient):
     volume_path = _extract_volume_path(request)
     dir_path = body.path if body.path.endswith("/") else body.path + "/"
     real_path = to_real_path(volume_path, dir_path)
-    w = WorkspaceClient()
     try:
-        w.files.create_directory(real_path)
+        ws.files.create_directory(real_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create directory: {e}")
     return {"ok": True, "path": dir_path}
@@ -141,16 +139,15 @@ async def files_mkdir(body: MkdirRequest, request: Request):
 
 @router.delete("/files/delete", operation_id="filesDelete")
 async def files_delete(
-    request: Request, path: str = Query(...), is_dir: bool = Query(False)
+    request: Request, ws: Dependencies.UserClient, path: str = Query(...), is_dir: bool = Query(False)
 ):
     volume_path = _extract_volume_path(request)
     real_path = to_real_path(volume_path, path)
-    w = WorkspaceClient()
     try:
         if is_dir:
-            _delete_directory_recursive(w, real_path)
+            _delete_directory_recursive(ws, real_path)
         else:
-            w.files.delete(real_path)
+            ws.files.delete(real_path)
     except (NotFound, ResourceDoesNotExist):
         raise HTTPException(status_code=404, detail="File or directory not found")
     except Exception as e:
