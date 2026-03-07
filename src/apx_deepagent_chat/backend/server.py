@@ -1,4 +1,5 @@
 # これらは環境変数等の設定を鑑みて先にロードする
+from databricks.sdk import WorkspaceClient
 from .core._config import AppConfig
 from .core._static import CachedStaticFiles, add_not_found_handler
 from .router import router as api_router
@@ -28,6 +29,7 @@ setup_mlflow_git_based_version_tracking()
 @app.on_event("startup")
 async def startup():
     app.state.config = AppConfig()
+    app.state.workspace_client = WorkspaceClient()
 
 
 # Add existing APX API routes (/api/version, /api/current-user, etc.)
