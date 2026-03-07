@@ -40,7 +40,7 @@ from .agent_utils import (
 mlflow.langchain.autolog()
 sp_workspace_client = WorkspaceClient()
 
-MODEL = "databricks-gpt-oss-20b"
+MODEL = "databricks-qwen3-next-80b-a3b-instruct"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 
@@ -309,10 +309,11 @@ def _load_preset_files() -> dict[str, Any]:
     # assets/skills/** -> /skills/**
     skills_dir = ASSETS_DIR / "skills"
     if skills_dir.exists():
+        _TEXT_SUFFIXES = {".md", ".py", ".txt"}
         for file_path in skills_dir.rglob("*"):
-            if file_path.is_file():
+            if file_path.is_file() and file_path.suffix in _TEXT_SUFFIXES:
                 rel = file_path.relative_to(ASSETS_DIR)
-                files[f"/{rel}"] = create_file_data(file_path.read_text())
+                files[f"/{rel}"] = create_file_data(file_path.read_text(encoding="utf-8"))
 
     return files
 
