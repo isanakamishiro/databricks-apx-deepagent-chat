@@ -40,9 +40,8 @@ from .agent_utils import (
 mlflow.langchain.autolog()
 sp_workspace_client = WorkspaceClient()
 
-_PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 MODEL = "databricks-gpt-oss-20b"
-ASSETS_DIR = _PROJECT_ROOT / "assets"
+ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 
 # --- Module-level caches ---
@@ -359,7 +358,8 @@ async def init_agent(
     if not volume_path:
         raise ValueError("volume_path is required")
 
-    mcp_tools = await _get_mcp_tools(ws_client)
+    # mcp_tools = await _get_mcp_tools(ws_client)
+    mcp_tools = await _get_mcp_tools(sp_workspace_client)
 
     subagents = _build_subagents(
         mcp_tools=mcp_tools,
