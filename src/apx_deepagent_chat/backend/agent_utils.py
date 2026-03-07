@@ -1,11 +1,10 @@
+import json
 import logging
+from functools import cache
 from typing import Any, AsyncGenerator, AsyncIterator, Iterator, Optional
 from uuid import uuid4
 
-logger = logging.getLogger(__name__)
-
 from databricks.sdk import WorkspaceClient
-import json
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from mlflow.genai.agent_server import get_request_headers
 from mlflow.types.responses import (
@@ -14,6 +13,8 @@ from mlflow.types.responses import (
     create_text_output_item,
     output_to_responses_items_stream,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_from_list(blocks: list) -> str:
@@ -58,12 +59,13 @@ def get_user_workspace_client() -> WorkspaceClient:
     return WorkspaceClient(token=token, auth_type="pat")
 
 
+@cache
 def get_databricks_host_from_env() -> Optional[str]:
     try:
         w = WorkspaceClient()
         return w.config.host
     except Exception as e:
-        logging.exception(f"Error getting databricks host from env: {e}")
+        logger.exception(f"Error getting databricks host from env: {e}")
         return None
 
 
@@ -146,7 +148,7 @@ async def process_agent_astream_events(
                             name=agent_name,  # type: ignore[call-arg]
                         ))
                 except Exception as e:
-                    logging.exception(f"Error extracting subagent name: {e}")
+                    logger.exception(f"Error extracting subagent name: {e}")
                 continue
 
             if mode == "updates":
@@ -219,7 +221,7 @@ async def process_agent_astream_events(
                             **create_text_delta(delta=text, item_id=chunk.id)
                         ))
             except Exception as e:
-                logging.exception(f"Error processing agent stream event: {e}")
+                logger.exception(f"Error processing agent stream event: {e}")
 
     # --- ストリーム完了後 ---
     logger.debug("[stream] completed. accumulated_text_len=%d output_items=%d", len(_accumulated_text), len(_all_output_items))
