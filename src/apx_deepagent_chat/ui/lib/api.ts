@@ -124,12 +124,41 @@ export function useAgent_info_endpoint_agent_info_getSuspense<TData = {
         ...options?.query
     });
 }
-export const chat = async (options?: RequestInit): Promise<{
+export interface ChatParams {
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const chat = async (params?: ChatParams, options?: RequestInit): Promise<{
     data: unknown;
 }> =>{
     const res = await fetch("/api/chat", {
         ...options,
-        method: "POST"
+        method: "POST",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
     });
     if (!res.ok) {
         const body = await res.text();
@@ -148,10 +177,12 @@ export const chat = async (options?: RequestInit): Promise<{
 export function useChat(options?: {
     mutation?: UseMutationOptions<{
         data: unknown;
-    }, ApiError, void>;
+    }, ApiError, {
+        params: ChatParams;
+    }>;
 }) {
     return useMutation({
-        mutationFn: ()=>chat(),
+        mutationFn: (vars)=>chat(vars.params),
         ...options?.mutation
     });
 }

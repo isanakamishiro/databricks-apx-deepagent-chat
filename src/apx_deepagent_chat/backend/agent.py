@@ -34,12 +34,12 @@ from .uc_backend import UCVolumesBackend
 from .uc_checkpointer import UCVolumesCheckpointer
 from .agent_utils import (
     get_databricks_host_from_env,
+    get_sp_workspace_client,
     get_user_workspace_client,
     process_agent_astream_events,
 )
 
 mlflow.langchain.autolog()
-sp_workspace_client = WorkspaceClient()
 
 MODEL = "databricks-qwen3-next-80b-a3b-instruct"
 USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
@@ -348,7 +348,7 @@ def _build_subagents(
     override_model=None,
 ) -> list:
     """Load subagent definitions from YAML and inject dynamic tools."""
-    ws_client = workspace_client or sp_workspace_client
+    ws_client = workspace_client or get_sp_workspace_client()
 
     subagents = _load_subagents(ASSETS_DIR / "subagents.yaml")
     for sa in subagents:
@@ -374,12 +374,12 @@ async def init_agent(
     if override_model is None and USE_FAKE_MODEL:
         override_model = _make_fake_model()
 
-    ws_client = workspace_client or sp_workspace_client
+    ws_client = workspace_client or get_sp_workspace_client()
     if not volume_path:
         raise ValueError("volume_path is required")
 
     # mcp_tools = await _get_mcp_tools(ws_client)
-    mcp_tools = await _get_mcp_tools(sp_workspace_client)
+    mcp_tools = await _get_mcp_tools(get_sp_workspace_client())
 
     subagents = _build_subagents(
         mcp_tools=mcp_tools,
@@ -464,7 +464,7 @@ async def streaming(
 
     checkpointer = UCVolumesCheckpointer(
         volume_path=volume_path,
-        workspace_client=sp_workspace_client,
+        workspace_client=get_sp_workspace_client(),
     )
     agent = await init_agent(
         user_workspace_client,

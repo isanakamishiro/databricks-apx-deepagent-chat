@@ -14,7 +14,6 @@ from mlflow.genai.agent_server import AgentServer, setup_mlflow_git_based_versio
 # Import agent to register @invoke / @stream handlers with AgentServer
 from . import agent  # noqa: F401
 
-
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
 # AgentServer provides /invocations and /responses endpoints
@@ -35,12 +34,33 @@ async def startup():
 app.include_router(api_router)
 
 # /responses ハンドラを /api/chat にも登録（dev プロキシは /api のみバックエンドへ転送するため）
+from fastapi import Request  # noqa: E402
 from fastapi.routing import APIRoute  # noqa: E402
 
-for route in list(app.routes):
-    if isinstance(route, APIRoute) and route.path == "/responses":
-        app.add_api_route("/api/chat", route.endpoint, methods=["POST"], operation_id="chat")
-        break
+from .core.dependencies import Dependencies  # noqa: E402
+from .agent_utils import _injected_user_ws_client, _injected_sp_ws_client  # noqa: E402
+
+_responses_handler = next(
+    (r.endpoint for r in app.routes if isinstance(r, APIRoute) and r.path == "/responses"),
+    None,
+)
+
+if _responses_handler:
+    _handler = _responses_handler  # Pyright narrowing: non-None capture
+
+    @app.post("/api/chat", operation_id="chat")
+    async def chat_endpoint(
+        request: Request,
+        user_client: Dependencies.UserClient,
+        sp_client: Dependencies.Client,
+    ):
+        tok_user = _injected_user_ws_client.set(user_client)
+        tok_sp = _injected_sp_ws_client.set(sp_client)
+        try:
+            return await _handler(request)
+        finally:
+            _injected_user_ws_client.reset(tok_user)
+            _injected_sp_ws_client.reset(tok_sp)
 
 
 # Serve frontend static files

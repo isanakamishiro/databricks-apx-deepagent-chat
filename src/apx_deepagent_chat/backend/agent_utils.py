@@ -1,5 +1,6 @@
 import json
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import cache
 from typing import Any, AsyncGenerator, AsyncIterator, Iterator, Optional
@@ -8,6 +9,16 @@ from uuid import uuid4
 from databricks.sdk import WorkspaceClient
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from mlflow.genai.agent_server import get_request_headers
+
+# Dependencies.UserClient で注入された WorkspaceClient を受け取る ContextVar
+_injected_user_ws_client: ContextVar[WorkspaceClient | None] = ContextVar(
+    "_injected_user_ws_client", default=None
+)
+
+# Dependencies.Client（SP）で注入された WorkspaceClient を受け取る ContextVar
+_injected_sp_ws_client: ContextVar[WorkspaceClient | None] = ContextVar(
+    "_injected_sp_ws_client", default=None
+)
 from mlflow.types.responses import (
     ResponsesAgentStreamEvent,
     create_text_delta,
@@ -53,16 +64,27 @@ def _extract_text_content(content) -> str:
 
 
 def get_user_workspace_client() -> WorkspaceClient:
-    """リクエストヘッダーのアクセストークンを使ってユーザー認証済み WorkspaceClient を返す.
+    """ユーザー認証済み WorkspaceClient を返す（DI優先、フォールバックあり）.
 
-    OBO (On-Behalf-Of) トークンが存在する場合は PAT 認証で初期化し、
-    存在しない場合はデフォルトの WorkspaceClient を返す。
+    FastAPI DI 経由で注入された場合はそれを返し、
+    mlflow ハンドラー経由の場合はリクエストヘッダーから生成する。
     """
+    injected = _injected_user_ws_client.get()
+    if injected is not None:
+        return injected
+    # フォールバック: mlflow Context Var からヘッダー経由で生成
     token = get_request_headers().get("x-forwarded-access-token")
     if not token:
         return WorkspaceClient()
-
     return WorkspaceClient(token=token, auth_type="pat")
+
+
+def get_sp_workspace_client() -> WorkspaceClient:
+    """サービスプリンシパル WorkspaceClient を返す（DI優先、フォールバックあり）."""
+    injected = _injected_sp_ws_client.get()
+    if injected is not None:
+        return injected
+    return WorkspaceClient()
 
 
 @cache
