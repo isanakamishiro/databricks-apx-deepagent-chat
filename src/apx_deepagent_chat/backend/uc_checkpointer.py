@@ -44,6 +44,7 @@ from langgraph.checkpoint.base import (
     get_checkpoint_metadata,
 )
 from langgraph.checkpoint.memory import InMemorySaver
+import mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -659,7 +660,6 @@ class UCVolumesCheckpointer(
         next_h = random.random()
         return f"{next_v:032}.{next_h:016}"
 
-
 class UCBundleCheckpointer(InMemorySaver):
     """UC Volumes backed checkpointer using a single bundle.json.gz per thread.
 
@@ -705,7 +705,6 @@ class UCBundleCheckpointer(InMemorySaver):
     # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
-
     async def __aenter__(self) -> "UCBundleCheckpointer":
         t0 = time.monotonic()
         await asyncio.to_thread(self._load_bundle)
@@ -721,6 +720,7 @@ class UCBundleCheckpointer(InMemorySaver):
     # Bundle I/O
     # ------------------------------------------------------------------
 
+    @mlflow.trace(span_type="UNKNOWN")
     def _load_bundle(self) -> None:
         """Download bundle.json.gz and populate InMemorySaver storage."""
         try:
@@ -759,6 +759,7 @@ class UCBundleCheckpointer(InMemorySaver):
             blob_bytes: tuple[str, bytes] = (type_str, base64.b64decode(b64_data))
             self.blobs[(thread_id, ns, channel, version_str)] = blob_bytes
 
+    @mlflow.trace(span_type="UNKNOWN")
     def _save_bundle(self) -> None:
         """Serialize InMemorySaver storage and upload as bundle.json."""
         thread_id = self._thread_id
