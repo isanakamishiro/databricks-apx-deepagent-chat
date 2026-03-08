@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gzip
 import io
 import json
 import logging
@@ -660,7 +661,7 @@ class UCVolumesCheckpointer(
 
 
 class UCBundleCheckpointer(InMemorySaver):
-    """UC Volumes backed checkpointer using a single bundle.json per thread.
+    """UC Volumes backed checkpointer using a single bundle.json.gz per thread.
 
     Loads all state from UC in ``__aenter__`` (1 API call) and saves back in
     ``__aexit__`` (1 API call).  All get/put operations during a turn run
@@ -668,9 +669,11 @@ class UCBundleCheckpointer(InMemorySaver):
 
     Bundle path::
 
-        {volume_path}/.checkpoints/{thread_id}/bundle.json
+        {volume_path}/.checkpoints/{thread_id}/bundle.json.gz
 
-    Bundle JSON format::
+    Falls back to legacy ``bundle.json`` (uncompressed) if ``.gz`` is not found.
+
+    Bundle JSON format (gzip-compressed)::
 
         {
             "version": 1,
@@ -692,7 +695,7 @@ class UCBundleCheckpointer(InMemorySaver):
         self._thread_id = thread_id
         self._w = workspace_client or WorkspaceClient()
         self._bundle_path = (
-            f"{volume_path.rstrip('/')}/.checkpoints/{thread_id}/bundle.json"
+            f"{volume_path.rstrip('/')}/.checkpoints/{thread_id}/bundle.json.gz"
         )
 
     @property
@@ -719,17 +722,29 @@ class UCBundleCheckpointer(InMemorySaver):
     # ------------------------------------------------------------------
 
     def _load_bundle(self) -> None:
-        """Download bundle.json and populate InMemorySaver storage."""
-        try:
-            resp = self._files.download(self._bundle_path)
-            if resp.contents is None:
+        """Download bundle.json.gz (or legacy bundle.json) and populate InMemorySaver storage."""
+        legacy_path = self._bundle_path[:-3]  # .json.gz → .json
+
+        raw: bytes | None = None
+        for path, compressed in [(self._bundle_path, True), (legacy_path, False)]:
+            try:
+                resp = self._files.download(path)
+                if resp.contents is None:
+                    return
+                raw = resp.contents.read()
+                if compressed:
+                    raw = gzip.decompress(raw)
+                break
+            except (NotFound, ResourceDoesNotExist):
+                continue
+            except DatabricksError as e:
+                logger.warning("[bundle] load failed: %s", e)
                 return
-            bundle = json.loads(resp.contents.read().decode("utf-8"))
-        except (NotFound, ResourceDoesNotExist):
+
+        if raw is None:
             return  # New conversation — nothing to load
-        except DatabricksError as e:
-            logger.warning("[bundle] load failed: %s", e)
-            return
+
+        bundle = json.loads(raw.decode("utf-8"))
 
         thread_id = self._thread_id
 
@@ -806,7 +821,7 @@ class UCBundleCheckpointer(InMemorySaver):
             "blobs": blobs_rows,
         }
 
-        content = json.dumps(bundle).encode("utf-8")
+        content = gzip.compress(json.dumps(bundle).encode("utf-8"), compresslevel=6)
         bundle_dir = str(PurePosixPath(self._bundle_path).parent)
         try:
             self._files.create_directory(bundle_dir)
