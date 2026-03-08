@@ -17,7 +17,7 @@ from databricks_langchain import (
     DatabricksMultiServerMCPClient,
 )
 from deepagents import create_deep_agent
-from deepagents.backends import CompositeBackend, StoreBackend
+from deepagents.backends import CompositeBackend, StoreBackend, StateBackend
 from deepagents.backends.utils import create_file_data
 from langgraph.store.memory import InMemoryStore
 from langchain.agents.middleware import wrap_model_call, wrap_tool_call
@@ -311,6 +311,7 @@ def _load_system_prompt(prompt_path: Path) -> str:
     """Load system prompt from file (cached)."""
     return prompt_path.read_text()
 
+
 @functools.cache
 def _load_preset_files() -> dict[str, Any]:
     """assets/ ディレクトリのファイルデータをキャッシュして返す。"""
@@ -328,17 +329,19 @@ def _load_preset_files() -> dict[str, Any]:
         for file_path in skills_dir.rglob("*"):
             if file_path.is_file() and file_path.suffix in _TEXT_SUFFIXES:
                 rel = file_path.relative_to(ASSETS_DIR)
-                files[f"/{rel}"] = create_file_data(file_path.read_text(encoding="utf-8"))
+                files[f"/{rel}"] = create_file_data(
+                    file_path.read_text(encoding="utf-8")
+                )
 
     return files
 
 
-def _init_preset_store() -> InMemoryStore:
-    """キャッシュ済みファイルデータから新しい InMemoryStore を構築して返す。"""
-    store = InMemoryStore()
-    for key, value in _load_preset_files().items():
-        store.put(namespace=("filesystem",), key=key, value=value)
-    return store
+# def _init_preset_store() -> InMemoryStore:
+#     """キャッシュ済みファイルデータから新しい InMemoryStore を構築して返す。"""
+#     store = InMemoryStore()
+#     for key, value in _load_preset_files().items():
+#         store.put(namespace=("filesystem",), key=key, value=value)
+#     return store
 
 
 # --- スタートアップ時プリウォーム ---
@@ -366,6 +369,7 @@ class _AgentPrewarm(LifespanDependency):
         except Exception:
             _prewarm_logger.warning("[prewarm] failed (non-fatal)", exc_info=True)
         yield
+
 
 def _build_subagents(
     mcp_tools: list,
@@ -416,14 +420,14 @@ async def init_agent(
         use_responses_api=False,
     )
 
-    preset_store = _init_preset_store()
+    # preset_store = _init_preset_store()
     backend = lambda rt: CompositeBackend(
         default=UCVolumesBackend(
             volume_path=volume_path,
             workspace_client=ws_client,
         ),
         routes={
-            "/preset/": StoreBackend(rt),
+            "/preset/": StateBackend(rt),
         },
     )
 
@@ -439,7 +443,7 @@ async def init_agent(
         skills=["/preset/skills/", "skills/"],
         model=model,
         backend=backend,
-        store=preset_store,
+        # store=preset_store,
         subagents=subagents,
         checkpointer=checkpointer,
         middleware=[strip_content_block_ids, flatten_system_message],
@@ -497,9 +501,14 @@ async def streaming(
             volume_path=volume_path,
         )
 
-        all_messages = to_chat_completions_input([i.model_dump() for i in request.input])
+        all_messages = to_chat_completions_input(
+            [i.model_dump() for i in request.input]
+        )
         # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
-        messages = {"messages": [all_messages[-1]] if all_messages else []}
+        messages = {
+            "messages": [all_messages[-1]] if all_messages else [],
+            "files": _load_preset_files(),
+        }
         config = {"configurable": {"thread_id": thread_id}}
 
         max_ctx = 0

@@ -28,7 +28,7 @@ dev = [
 [tool.apx.metadata]
 app-name = "apx-deepagent-chat"
 app-slug = "apx_deepagent_chat"
-app-entrypoint = "apx_deepagent_chat.backend.server:app"
+app-entrypoint = "apx_deepagent_chat.backend.app:app"
 api-prefix = "/api"
 metadata-path = "src/apx_deepagent_chat/_metadata.py"
 
