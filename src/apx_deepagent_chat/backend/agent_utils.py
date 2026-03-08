@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import cache
@@ -308,6 +309,7 @@ async def process_agent_astream_events(
     """
     state = _StreamState()
     _ua = usage_accumulator if usage_accumulator is not None else {}
+    last_messages_time: float | None = None
 
     async for event in async_stream:
         # subgraphs=True: event is a 3-tuple (namespace, mode, data)
@@ -317,9 +319,13 @@ async def process_agent_astream_events(
         if _ns != ():
             # --- サブエージェントのイベント ---
             if mode == "messages":
+                last_messages_time = time.monotonic()
                 for item in _process_subagent_messages(data, state):
                     yield item
             elif mode == "updates":
+                if last_messages_time is not None:
+                    logger.info("[stream] messages→updates gap: %.3fs", time.monotonic() - last_messages_time)
+                    last_messages_time = None
                 for item in _process_subagent_updates(data, _ua, state.output_items):
                     yield item
             continue
@@ -333,16 +339,22 @@ async def process_agent_astream_events(
             state.current_agent_name = None
 
         if mode == "updates":
+            if last_messages_time is not None:
+                logger.info("[stream] messages→updates gap: %.3fs", time.monotonic() - last_messages_time)
+                last_messages_time = None
             for item in _process_main_agent_updates(data, _ua, state.output_items):
                 yield item
         elif mode == "messages":
+            last_messages_time = time.monotonic()
             for item in _process_main_agent_messages(data, state):
                 yield item
 
     # --- ストリーム完了後 ---
     logger.debug("[stream] completed. accumulated_text_len=%d output_items=%d", len(state.accumulated_text), len(state.output_items))
+    t0 = time.monotonic()
     for item in _finalize_stream(state, _ua, model, max_context_tokens):
         yield item
+    logger.info("[stream] _finalize_stream took: %.3fs", time.monotonic() - t0)
 
 
 

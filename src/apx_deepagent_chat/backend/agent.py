@@ -31,7 +31,7 @@ from mlflow.types.responses import (
 )
 
 from .uc_backend import UCVolumesBackend
-from .uc_checkpointer import UCVolumesCheckpointer
+from .uc_checkpointer import UCBundleCheckpointer
 from .agent_utils import (
     get_databricks_host_from_env,
     get_sp_workspace_client,
@@ -461,38 +461,40 @@ async def streaming(
 ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
     user_workspace_client = get_user_workspace_client()
     volume_path = _get_volume_path(request)
+    thread_id = _get_or_create_thread_id(request)
 
-    checkpointer = UCVolumesCheckpointer(
+    checkpointer = UCBundleCheckpointer(
         volume_path=volume_path,
+        thread_id=thread_id,
         workspace_client=get_sp_workspace_client(),
     )
-    agent = await init_agent(
-        user_workspace_client,
-        checkpointer=checkpointer,
-        volume_path=volume_path,
-    )
+    async with checkpointer:
+        agent = await init_agent(
+            user_workspace_client,
+            checkpointer=checkpointer,
+            volume_path=volume_path,
+        )
 
-    all_messages = to_chat_completions_input([i.model_dump() for i in request.input])
-    # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
-    messages = {"messages": [all_messages[-1]] if all_messages else []}
-    thread_id = _get_or_create_thread_id(request)
-    config = {"configurable": {"thread_id": thread_id}}
+        all_messages = to_chat_completions_input([i.model_dump() for i in request.input])
+        # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
+        messages = {"messages": [all_messages[-1]] if all_messages else []}
+        config = {"configurable": {"thread_id": thread_id}}
 
-    max_ctx = 0
-    usage_accumulator: dict[str, int] = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-    }
-    async for event in process_agent_astream_events(
-        agent.astream(
-            input=messages,
-            config=config,
-            stream_mode=["updates", "messages"],
-            subgraphs=True,
-        ),
-        usage_accumulator=usage_accumulator,
-        model=MODEL,
-        max_context_tokens=max_ctx,
-    ):
-        yield event
+        max_ctx = 0
+        usage_accumulator: dict[str, int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
+        async for event in process_agent_astream_events(
+            agent.astream(
+                input=messages,
+                config=config,  # type: ignore[arg-type]
+                stream_mode=["updates", "messages"],
+                subgraphs=True,
+            ),
+            usage_accumulator=usage_accumulator,
+            model=MODEL,
+            max_context_tokens=max_ctx,
+        ):
+            yield event

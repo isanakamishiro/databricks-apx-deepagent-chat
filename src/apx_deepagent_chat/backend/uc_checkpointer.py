@@ -8,6 +8,10 @@ Directory layout under ``{volume_path}/{checkpoint_dir}/``:
     checkpoints/{thread_id}/{checkpoint_ns}/{checkpoint_id}.json
     writes/{thread_id}/{checkpoint_ns}/{checkpoint_id}/{task_id}_{write_idx}.json
     blobs/{thread_id}/{checkpoint_ns}/{channel}_{version}.json
+
+UCBundleCheckpointer uses a single bundle.json per thread:
+
+    .checkpoints/{thread_id}/bundle.json
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ import io
 import json
 import logging
 import random
+import time
 from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from pathlib import PurePosixPath
@@ -37,6 +42,7 @@ from langgraph.checkpoint.base import (
     get_checkpoint_id,
     get_checkpoint_metadata,
 )
+from langgraph.checkpoint.memory import InMemorySaver
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +91,7 @@ class UCVolumesCheckpointer(
         self._volume_path = volume_path.rstrip("/")
         self._w = workspace_client or WorkspaceClient()
         self._base = f"{self._volume_path}/{checkpoint_dir}"
+        self._created_dirs: set[str] = set()
 
     # ------------------------------------------------------------------
     # Context manager support
@@ -140,10 +147,14 @@ class UCVolumesCheckpointer(
 
     def _ensure_dir(self, path: str) -> None:
         parent = str(PurePosixPath(path).parent)
+        if parent in self._created_dirs:
+            return
         try:
             self.files.create_directory(parent)
+            self._created_dirs.add(parent)
         except Exception:
-            pass
+            # ディレクトリが既に存在する場合も成功とみなしキャッシュに追加
+            self._created_dirs.add(parent)
 
     def _upload_json(self, path: str, data: dict) -> None:
         self._ensure_dir(path)
@@ -545,9 +556,55 @@ class UCVolumesCheckpointer(
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
-        return await asyncio.to_thread(
-            self.put, config, checkpoint, metadata, new_versions
+        t0 = time.monotonic()
+        c = checkpoint.copy()
+        thread_id: str = config["configurable"]["thread_id"]
+        ns: str = config["configurable"].get("checkpoint_ns", "")
+        values: dict[str, Any] = c.pop("channel_values")  # type: ignore[misc]
+
+        async def _upload_blob(channel: str, version: Any) -> None:
+            if channel in values:
+                type_str, raw = self.serde.dumps_typed(values[channel])
+            else:
+                type_str, raw = "empty", b""
+            blob_data = {
+                "type": type_str,
+                "data": base64.b64encode(raw).decode("ascii"),
+            }
+            await asyncio.to_thread(
+                self._upload_json,
+                self._blob_path(thread_id, ns, channel, version),
+                blob_data,
+            )
+
+        # Upload all blobs in parallel, then commit checkpoint file
+        await asyncio.gather(*(_upload_blob(ch, v) for ch, v in new_versions.items()))
+
+        ckpt_data = {
+            "checkpoint": self._serialize_typed(c),
+            "metadata": self._serialize_typed(
+                get_checkpoint_metadata(config, metadata)
+            ),
+            "parent_checkpoint_id": config["configurable"].get("checkpoint_id"),
+        }
+        await asyncio.to_thread(
+            self._upload_json,
+            self._ckpt_path(thread_id, ns, checkpoint["id"]),
+            ckpt_data,
         )
+
+        logger.info(
+            "[checkpointer] aput took: %.3fs, channels=%d",
+            time.monotonic() - t0,
+            len(new_versions),
+        )
+        return {
+            "configurable": {
+                "thread_id": thread_id,
+                "checkpoint_ns": ns,
+                "checkpoint_id": checkpoint["id"],
+            }
+        }
 
     async def aput_writes(
         self,
@@ -556,7 +613,32 @@ class UCVolumesCheckpointer(
         task_id: str,
         task_path: str = "",
     ) -> None:
-        await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
+        t0 = time.monotonic()
+        thread_id: str = config["configurable"]["thread_id"]
+        ns: str = config["configurable"].get("checkpoint_ns", "")
+        ckpt_id: str = config["configurable"]["checkpoint_id"]
+
+        async def _upload_write(idx: int, channel: str, value: Any) -> None:
+            write_idx = WRITES_IDX_MAP.get(channel, idx)
+            write_file = self._write_path(thread_id, ns, ckpt_id, task_id, write_idx)
+            if write_idx >= 0 and await asyncio.to_thread(self._file_exists, write_file):
+                return
+            write_data = {
+                "task_id": task_id,
+                "channel": channel,
+                "value": self._serialize_typed(value),
+                "task_path": task_path,
+            }
+            await asyncio.to_thread(self._upload_json, write_file, write_data)
+
+        await asyncio.gather(
+            *(_upload_write(idx, ch, val) for idx, (ch, val) in enumerate(writes))
+        )
+        logger.info(
+            "[checkpointer] aput_writes took: %.3fs, writes=%d",
+            time.monotonic() - t0,
+            len(writes),
+        )
 
     async def adelete_thread(self, thread_id: str) -> None:
         await asyncio.to_thread(self.delete_thread, thread_id)
@@ -575,3 +657,173 @@ class UCVolumesCheckpointer(
         next_v = current_v + 1
         next_h = random.random()
         return f"{next_v:032}.{next_h:016}"
+
+
+class UCBundleCheckpointer(InMemorySaver):
+    """UC Volumes backed checkpointer using a single bundle.json per thread.
+
+    Loads all state from UC in ``__aenter__`` (1 API call) and saves back in
+    ``__aexit__`` (1 API call).  All get/put operations during a turn run
+    entirely in memory using InMemorySaver.
+
+    Bundle path::
+
+        {volume_path}/.checkpoints/{thread_id}/bundle.json
+
+    Bundle JSON format::
+
+        {
+            "version": 1,
+            "storage": [[ns, ckpt_id, ckpt_type, ckpt_b64, meta_type, meta_b64, parent_id|null], ...],
+            "writes":  [[ns, ckpt_id, task_id, write_idx, channel, val_type, val_b64, task_path], ...],
+            "blobs":   [[ns, channel, version_str, type_str, b64_data], ...]
+        }
+    """
+
+    def __init__(
+        self,
+        volume_path: str,
+        thread_id: str,
+        workspace_client: WorkspaceClient | None = None,
+        *,
+        serde: SerializerProtocol | None = None,
+    ) -> None:
+        super().__init__(serde=serde)
+        self._thread_id = thread_id
+        self._w = workspace_client or WorkspaceClient()
+        self._bundle_path = (
+            f"{volume_path.rstrip('/')}/.checkpoints/{thread_id}/bundle.json"
+        )
+
+    @property
+    def _files(self):
+        return self._w.files
+
+    # ------------------------------------------------------------------
+    # Context manager
+    # ------------------------------------------------------------------
+
+    async def __aenter__(self) -> "UCBundleCheckpointer":
+        t0 = time.monotonic()
+        await asyncio.to_thread(self._load_bundle)
+        logger.info("[bundle] load took: %.3fs", time.monotonic() - t0)
+        return self
+
+    async def __aexit__(self, *exc_info: Any) -> None:
+        t0 = time.monotonic()
+        await asyncio.to_thread(self._save_bundle)
+        logger.info("[bundle] save took: %.3fs", time.monotonic() - t0)
+
+    # ------------------------------------------------------------------
+    # Bundle I/O
+    # ------------------------------------------------------------------
+
+    def _load_bundle(self) -> None:
+        """Download bundle.json and populate InMemorySaver storage."""
+        try:
+            resp = self._files.download(self._bundle_path)
+            if resp.contents is None:
+                return
+            bundle = json.loads(resp.contents.read().decode("utf-8"))
+        except (NotFound, ResourceDoesNotExist):
+            return  # New conversation — nothing to load
+        except DatabricksError as e:
+            logger.warning("[bundle] load failed: %s", e)
+            return
+
+        thread_id = self._thread_id
+
+        # storage: [[ns, ckpt_id, ckpt_type, ckpt_b64, meta_type, meta_b64, parent_id|null], ...]
+        for row in bundle.get("storage", []):
+            ns, ckpt_id, ckpt_type, ckpt_b64, meta_type, meta_b64, parent_id = row
+            ckpt_bytes: tuple[str, bytes] = (ckpt_type, base64.b64decode(ckpt_b64))
+            meta_bytes: tuple[str, bytes] = (meta_type, base64.b64decode(meta_b64))
+            self.storage[thread_id][ns][ckpt_id] = (ckpt_bytes, meta_bytes, parent_id)
+
+        # writes: [[ns, ckpt_id, task_id, write_idx, channel, val_type, val_b64, task_path], ...]
+        for row in bundle.get("writes", []):
+            ns, ckpt_id, task_id, write_idx, channel, val_type, val_b64, task_path = row
+            outer_key = (thread_id, ns, ckpt_id)
+            inner_key = (task_id, int(write_idx))
+            val_bytes: tuple[str, bytes] = (val_type, base64.b64decode(val_b64))
+            self.writes[outer_key][inner_key] = (task_id, channel, val_bytes, task_path)
+
+        # blobs: [[ns, channel, version_str, type_str, b64_data], ...]
+        for row in bundle.get("blobs", []):
+            ns, channel, version_str, type_str, b64_data = row
+            blob_bytes: tuple[str, bytes] = (type_str, base64.b64decode(b64_data))
+            self.blobs[(thread_id, ns, channel, version_str)] = blob_bytes
+
+    def _save_bundle(self) -> None:
+        """Serialize InMemorySaver storage and upload as bundle.json."""
+        thread_id = self._thread_id
+
+        storage_rows = []
+        for ns, ns_data in self.storage.get(thread_id, {}).items():
+            for ckpt_id, (ckpt_bytes, meta_bytes, parent_id) in ns_data.items():
+                storage_rows.append([
+                    ns,
+                    ckpt_id,
+                    ckpt_bytes[0],
+                    base64.b64encode(ckpt_bytes[1]).decode("ascii"),
+                    meta_bytes[0],
+                    base64.b64encode(meta_bytes[1]).decode("ascii"),
+                    parent_id,
+                ])
+
+        writes_rows = []
+        for (tid, ns, ckpt_id), inner_writes in self.writes.items():
+            if tid != thread_id:
+                continue
+            for (task_id, write_idx), (t_id, channel, val_bytes, t_path) in inner_writes.items():
+                writes_rows.append([
+                    ns,
+                    ckpt_id,
+                    t_id,
+                    write_idx,
+                    channel,
+                    val_bytes[0],
+                    base64.b64encode(val_bytes[1]).decode("ascii"),
+                    t_path,
+                ])
+
+        blobs_rows = []
+        for (tid, ns, channel, version), blob_bytes in self.blobs.items():
+            if tid != thread_id:
+                continue
+            blobs_rows.append([
+                ns,
+                channel,
+                str(version),
+                blob_bytes[0],
+                base64.b64encode(blob_bytes[1]).decode("ascii"),
+            ])
+
+        bundle = {
+            "version": 1,
+            "storage": storage_rows,
+            "writes": writes_rows,
+            "blobs": blobs_rows,
+        }
+
+        content = json.dumps(bundle).encode("utf-8")
+        bundle_dir = str(PurePosixPath(self._bundle_path).parent)
+        try:
+            self._files.create_directory(bundle_dir)
+        except Exception:
+            pass
+        self._files.upload(self._bundle_path, io.BytesIO(content), overwrite=True)
+
+    # ------------------------------------------------------------------
+    # Delete thread
+    # ------------------------------------------------------------------
+
+    async def adelete_thread(self, thread_id: str) -> None:
+        """Delete in-memory state and UC bundle.json."""
+        self.delete_thread(thread_id)
+        try:
+            await asyncio.to_thread(self._files.delete, self._bundle_path)
+        except (NotFound, ResourceDoesNotExist):
+            pass
+        except DatabricksError as e:
+            logger.warning("[bundle] adelete_thread failed: %s", e)
