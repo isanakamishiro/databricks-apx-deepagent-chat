@@ -65,6 +65,8 @@ function Layout() {
 
   useEffect(() => {
     fetchChats();
+    window.addEventListener("chat-list-updated", fetchChats);
+    return () => window.removeEventListener("chat-list-updated", fetchChats);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, volumePath]);
 
@@ -99,7 +101,7 @@ function Layout() {
   };
 
   return (
-    <SidebarLayout defaultOpen={false}>
+    <SidebarLayout defaultOpen={false} onLogoClick={handleNewChat}>
       <SidebarGroup>
         <SidebarGroupLabel className="flex items-center justify-between pr-1">
           <span>会話履歴</span>

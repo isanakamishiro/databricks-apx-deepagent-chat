@@ -17,15 +17,16 @@ import Logo from "@/components/apx/logo";
 interface SidebarLayoutProps {
   children?: ReactNode;
   defaultOpen?: boolean;
+  onLogoClick?: () => void;
 }
 
-function SidebarLayout({ children, defaultOpen = true }: SidebarLayoutProps) {
+function SidebarLayout({ children, defaultOpen = true, onLogoClick }: SidebarLayoutProps) {
   return (
     <SidebarProvider defaultOpen={defaultOpen}>
       <Sidebar>
         <SidebarHeader>
           <div className="px-2 py-2">
-            <Logo />
+            <Logo to="" onClick={onLogoClick} />
           </div>
         </SidebarHeader>
         <SidebarContent>{children}</SidebarContent>

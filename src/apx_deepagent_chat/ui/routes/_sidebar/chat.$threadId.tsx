@@ -167,10 +167,13 @@ function ChatPage() {
     setStreaming(false);
   };
 
-  const handleSaveSettings = (vp: string, model: string) => {
+  const handleSaveSettings = (vp: string) => {
     setVolumePath(vp);
-    setSelectedModel(model);
     localStorage.setItem(STORAGE_KEY_VOLUME, vp);
+  };
+
+  const handleModelChange = (model: string) => {
+    setSelectedModel(model);
     localStorage.setItem(STORAGE_KEY_MODEL, model);
   };
 
@@ -196,7 +199,9 @@ function ChatPage() {
           createdAt: new Date().toISOString(),
           visibility: "private",
         }),
-      }).catch(() => {});
+      })
+        .then(() => window.dispatchEvent(new CustomEvent("chat-list-updated")))
+        .catch(() => {});
     }
 
     setMessages((prev) => [
@@ -412,6 +417,7 @@ function ChatPage() {
         onSubmit={handleSubmit}
         onRetry={handleRetry}
         onSaveSettings={handleSaveSettings}
+        onModelChange={handleModelChange}
       />
     </PromptInputProvider>
   );
@@ -428,7 +434,8 @@ type ChatContentProps = {
   availableModels: string[];
   onSubmit: (text: string) => void;
   onRetry: () => void;
-  onSaveSettings: (vp: string, model: string) => void;
+  onSaveSettings: (vp: string) => void;
+  onModelChange: (model: string) => void;
 };
 
 function ChatContent({
@@ -441,6 +448,7 @@ function ChatContent({
   onSubmit,
   onRetry,
   onSaveSettings,
+  onModelChange,
 }: ChatContentProps) {
   const { textInput } = usePromptInputController();
 
@@ -466,7 +474,7 @@ function ChatContent({
               value={selectedModel}
               onValueChange={(v) => {
                 localStorage.setItem("apx_selected_model", v);
-                onSaveSettings(volumePath, v);
+                onModelChange(v);
               }}
             >
               <PromptInputSelectTrigger className="h-7 text-xs max-w-[180px]">
@@ -483,8 +491,6 @@ function ChatContent({
           )}
           <SettingsDialog
             volumePath={volumePath}
-            selectedModel={selectedModel}
-            availableModels={availableModels}
             onSave={onSaveSettings}
           />
         </PromptInputTools>
@@ -495,18 +501,20 @@ function ChatContent({
 
   if (!hasMessages) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8 overflow-auto">
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8 px-[20%] overflow-auto">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">{__APP_NAME__}</h1>
+          <h1 className="text-2xl font-bold">APX-Agent</h1>
           <p className="text-muted-foreground text-sm">
             何でも聞いてください
           </p>
         </div>
-        <Suggestions>
-          {STARTER_SUGGESTIONS.map((s) => (
-            <Suggestion key={s} suggestion={s} onClick={handleSuggestionClick} />
-          ))}
-        </Suggestions>
+        <div className="flex justify-center w-full max-w-2xl">
+          <Suggestions>
+            {STARTER_SUGGESTIONS.map((s) => (
+              <Suggestion key={s} suggestion={s} onClick={handleSuggestionClick} />
+            ))}
+          </Suggestions>
+        </div>
         <div className="w-full max-w-2xl">{promptInput}</div>
       </div>
     );
@@ -515,7 +523,7 @@ function ChatContent({
   return (
     <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
       <Conversation className="flex-1">
-        <ConversationContent>
+        <ConversationContent className="max-w-2xl mx-auto w-full">
           {messages.map((msg, i) => {
             const isLast = i === messages.length - 1;
             return (
@@ -593,7 +601,9 @@ function ChatContent({
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
-      <div className="shrink-0 border-t p-4">{promptInput}</div>
+      <div className="shrink-0 border-t p-4">
+        <div className="max-w-2xl mx-auto">{promptInput}</div>
+      </div>
     </div>
   );
 }

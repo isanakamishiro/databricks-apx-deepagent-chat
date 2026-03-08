@@ -12,28 +12,22 @@ import {
 
 type SettingsDialogProps = {
   volumePath: string;
-  selectedModel: string;
-  availableModels: string[];
-  onSave: (volumePath: string, model: string) => void;
+  onSave: (volumePath: string) => void;
 };
 
 export function SettingsDialog({
   volumePath,
-  selectedModel,
-  availableModels,
   onSave,
 }: SettingsDialogProps) {
   const [open, setOpen] = useState(false);
   const [localVolumePath, setLocalVolumePath] = useState(volumePath);
-  const [localModel, setLocalModel] = useState(selectedModel);
 
   useEffect(() => {
     setLocalVolumePath(volumePath);
-    setLocalModel(selectedModel);
-  }, [volumePath, selectedModel]);
+  }, [volumePath]);
 
   const handleSave = () => {
-    onSave(localVolumePath.trim(), localModel);
+    onSave(localVolumePath.trim());
     setOpen(false);
   };
 
@@ -59,20 +53,6 @@ export function SettingsDialog({
             <p className="text-xs text-muted-foreground">
               チャット履歴・ファイルの保存先 Volume パス
             </p>
-          </div>
-          <div className="space-y-1">
-            <label className="text-sm font-medium">モデル</label>
-            <select
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
-              value={localModel}
-              onChange={(e) => setLocalModel(e.target.value)}
-            >
-              {availableModels.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
           </div>
           <Button className="w-full" onClick={handleSave}>
             保存

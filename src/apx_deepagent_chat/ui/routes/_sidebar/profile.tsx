@@ -51,7 +51,7 @@ function ProfileContent() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-5xl mx-auto">
       {/* Header Card */}
       <Card className="border-primary/20">
         <CardContent className="pt-6">
@@ -262,7 +262,7 @@ function ProfileContent() {
 
 function ProfileSkeleton() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-5xl mx-auto">
       {/* Header Card Skeleton */}
       <Card className="border-primary/20">
         <CardContent className="pt-6">
@@ -298,6 +298,7 @@ function ProfileSkeleton() {
 
 function Profile() {
   return (
+    <div className="w-full overflow-auto p-6">
     <QueryErrorResetBoundary>
       {({ reset }) => (
         <ErrorBoundary
@@ -331,5 +332,6 @@ function Profile() {
         </ErrorBoundary>
       )}
     </QueryErrorResetBoundary>
+    </div>
   );
 }
