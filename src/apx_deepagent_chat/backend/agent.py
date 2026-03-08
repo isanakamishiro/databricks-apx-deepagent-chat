@@ -129,6 +129,7 @@ def _init_mcp_client(
     )
 
 
+@mlflow.trace(span_type="UNKNOWN")
 async def _get_mcp_tools(workspace_client: WorkspaceClient) -> list:
     """MCP ツール一覧を取得しキャッシュする（TTL: 30分）。"""
     global _mcp_tools_cache, _mcp_tools_cached_at
@@ -385,6 +386,7 @@ def _build_subagents(
     return subagents
 
 
+@mlflow.trace(span_type="UNKNOWN")
 async def init_agent(
     workspace_client: Optional[WorkspaceClient] = None,
     checkpointer=None,
