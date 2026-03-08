@@ -26,6 +26,16 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import {
+  Context,
+  ContextTrigger,
+  ContextContent,
+  ContextContentHeader,
+  ContextContentBody,
+  ContextInputUsage,
+  ContextOutputUsage,
+  ContextContentFooter,
+} from "@/components/ai-elements/context";
+import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
@@ -76,6 +86,16 @@ type ChatMessage = {
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
+
+function getModelMaxTokens(model?: string): number {
+  if (!model) return 200_000;
+  if (model.includes("opus")) return 200_000;
+  if (model.includes("sonnet")) return 200_000;
+  if (model.includes("haiku")) return 200_000;
+  if (model.includes("gpt-4o")) return 128_000;
+  if (model.includes("gpt-4")) return 128_000;
+  return 200_000;
+}
 
 const STORAGE_KEY_VOLUME = "apx_volume_path";
 const STORAGE_KEY_MODEL = "apx_selected_model";
@@ -618,21 +638,47 @@ function ChatContent({
                   )}
                 </MessageContent>
                 {msg.role === "assistant" && !streaming && msg.content && (
-                  <MessageActions>
-                    <MessageAction
-                      tooltip="コピー"
-                      onClick={() =>
-                        navigator.clipboard.writeText(msg.content)
-                      }
-                    >
-                      <Copy className="size-3.5" />
-                    </MessageAction>
-                    {isLast && (
-                      <MessageAction tooltip="再生成" onClick={onRetry}>
-                        <RefreshCw className="size-3.5" />
+                  <div className="flex flex-col items-start gap-1">
+                    <MessageActions>
+                      <MessageAction
+                        tooltip="コピー"
+                        onClick={() =>
+                          navigator.clipboard.writeText(msg.content)
+                        }
+                      >
+                        <Copy className="size-3.5" />
                       </MessageAction>
+                      {isLast && (
+                        <MessageAction tooltip="再生成" onClick={onRetry}>
+                          <RefreshCw className="size-3.5" />
+                        </MessageAction>
+                      )}
+                    </MessageActions>
+                    {isLast && msg.usage && (
+                      <Context
+                        usedTokens={msg.usage.total_tokens}
+                        maxTokens={getModelMaxTokens(msg.model)}
+                        usage={{
+                          inputTokens: msg.usage.input_tokens,
+                          outputTokens: msg.usage.output_tokens,
+                          totalTokens: msg.usage.total_tokens,
+                          inputTokenDetails: { noCacheTokens: undefined, cacheReadTokens: undefined, cacheWriteTokens: undefined },
+                          outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+                        }}
+                        modelId={msg.model}
+                      >
+                        <ContextTrigger size="icon-sm" />
+                        <ContextContent>
+                          <ContextContentHeader />
+                          <ContextContentBody>
+                            <ContextInputUsage />
+                            <ContextOutputUsage />
+                          </ContextContentBody>
+                          <ContextContentFooter />
+                        </ContextContent>
+                      </Context>
                     )}
-                  </MessageActions>
+                  </div>
                 )}
               </Message>
             );
