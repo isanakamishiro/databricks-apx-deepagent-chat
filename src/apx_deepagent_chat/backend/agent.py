@@ -1,7 +1,9 @@
 import asyncio
 import functools
+import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
 
@@ -30,6 +32,7 @@ from mlflow.types.responses import (
     to_chat_completions_input,
 )
 
+from .core._base import LifespanDependency
 from .uc_backend import UCVolumesBackend
 from .uc_checkpointer import UCBundleCheckpointer
 from .agent_utils import (
@@ -341,6 +344,33 @@ def _init_preset_store() -> InMemoryStore:
     return store
 
 
+# --- スタートアップ時プリウォーム ---
+_prewarm_logger = logging.getLogger(__name__)
+
+
+class _AgentPrewarm(LifespanDependency):
+    """アプリ起動時にキャッシュを並列プリウォームし、初回リクエストのコールドスタートを排除する。"""
+
+    @staticmethod
+    def __call__():
+        return None
+
+    @asynccontextmanager
+    async def lifespan(self, app):
+        t0 = time.monotonic()
+        try:
+            await asyncio.gather(
+                _get_mcp_tools(get_sp_workspace_client()),
+                asyncio.to_thread(_load_subagents, ASSETS_DIR / "subagents.yaml"),
+                asyncio.to_thread(_load_system_prompt, ASSETS_DIR / "system_prompt.md"),
+                asyncio.to_thread(_load_preset_files),
+            )
+            _prewarm_logger.info("[prewarm] completed in %.3fs", time.monotonic() - t0)
+        except Exception:
+            _prewarm_logger.warning("[prewarm] failed (non-fatal)", exc_info=True)
+        yield
+
+
 def _build_subagents(
     mcp_tools: list,
     volume_path: str,
@@ -468,13 +498,19 @@ async def streaming(
         thread_id=thread_id,
         workspace_client=get_sp_workspace_client(),
     )
-    async with checkpointer:
-        agent = await init_agent(
+
+    # バンドルDLとエージェント初期化を並列実行
+    # init_agent はcheckpointerオブジェクト参照のみ必要（バンドルデータ不要）
+    agent, _ = await asyncio.gather(
+        init_agent(
             user_workspace_client,
             checkpointer=checkpointer,
             volume_path=volume_path,
-        )
+        ),
+        checkpointer.__aenter__(),
+    )
 
+    try:
         all_messages = to_chat_completions_input([i.model_dump() for i in request.input])
         # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
         messages = {"messages": [all_messages[-1]] if all_messages else []}
@@ -498,3 +534,5 @@ async def streaming(
             max_context_tokens=max_ctx,
         ):
             yield event
+    finally:
+        await checkpointer.__aexit__(None, None, None)
