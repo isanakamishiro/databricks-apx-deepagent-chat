@@ -98,6 +98,7 @@ function ChatPage() {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const prevStreamingRef = useRef(false);
@@ -131,6 +132,8 @@ function ChatPage() {
 
     if (!userId) return;
 
+    setIsLoadingHistory(true);
+
     fetch(
       `/api/chat-history/${threadId}/messages?user_id=${encodeURIComponent(userId)}`,
       {
@@ -147,7 +150,10 @@ function ChatPage() {
           setMessages(msgs as ChatMessage[]);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        setIsLoadingHistory(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
 
@@ -201,10 +207,7 @@ function ChatPage() {
 
   const handleSubmit = async (text: string) => {
     if (!text.trim()) return;
-    if (streaming) {
-      handleStop();
-      return;
-    }
+    if (streaming || isLoadingHistory) return;
 
     // 最初のメッセージ時にチャット履歴を保存
     if (messages.length === 0 && volumePath) {
@@ -445,10 +448,12 @@ function ChatPage() {
       <ChatContent
         messages={messages}
         streaming={streaming}
+        isLoadingHistory={isLoadingHistory}
         volumePath={volumePath}
         selectedModel={selectedModel}
         availableModels={availableModels}
         onSubmit={handleSubmit}
+        onStop={handleStop}
         onRetry={handleRetry}
         onSaveSettings={handleSaveSettings}
         onModelChange={handleModelChange}
@@ -462,10 +467,12 @@ function ChatPage() {
 type ChatContentProps = {
   messages: ChatMessage[];
   streaming: boolean;
+  isLoadingHistory: boolean;
   volumePath: string;
   selectedModel: string;
   availableModels: string[];
   onSubmit: (text: string) => void;
+  onStop: () => void;
   onRetry: () => void;
   onSaveSettings: (vp: string) => void;
   onModelChange: (model: string) => void;
@@ -474,10 +481,12 @@ type ChatContentProps = {
 function ChatContent({
   messages,
   streaming,
+  isLoadingHistory,
   volumePath,
   selectedModel,
   availableModels,
   onSubmit,
+  onStop,
   onRetry,
   onSaveSettings,
   onModelChange,
@@ -491,6 +500,7 @@ function ChatContent({
       <PromptInputBody>
         <PromptInputTextarea
           placeholder="メッセージを入力... (Enter で送信、Shift+Enter で改行)"
+          disabled={streaming || isLoadingHistory}
         />
       </PromptInputBody>
       <PromptInputFooter>
@@ -520,7 +530,10 @@ function ChatContent({
             onSave={onSaveSettings}
           />
         </PromptInputTools>
-        <PromptInputSubmit status={streaming ? "streaming" : undefined} />
+        <PromptInputSubmit
+          status={streaming ? "streaming" : undefined}
+          onClick={streaming ? onStop : undefined}
+        />
       </PromptInputFooter>
     </PromptInput>
   );
@@ -529,7 +542,22 @@ function ChatContent({
     <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
       <Conversation className="flex-1">
         <ConversationContent className="max-w-2xl mx-auto w-full">
-          {messages.map((msg, i) => {
+          {isLoadingHistory ? (
+            <div className="space-y-4 py-4">
+              <div className="flex justify-end">
+                <Skeleton className="h-10 w-48 rounded-2xl" />
+              </div>
+              <div className="flex justify-start">
+                <Skeleton className="h-16 w-64 rounded-2xl" />
+              </div>
+              <div className="flex justify-end">
+                <Skeleton className="h-10 w-40 rounded-2xl" />
+              </div>
+              <div className="flex justify-start">
+                <Skeleton className="h-24 w-72 rounded-2xl" />
+              </div>
+            </div>
+          ) : messages.map((msg, i) => {
             const isLast = i === messages.length - 1;
             return (
               <Message key={i} from={msg.role}>
