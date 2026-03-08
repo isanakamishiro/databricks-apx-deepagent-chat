@@ -4,6 +4,7 @@ import { useCurrentUserSuspense } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import selector from "@/lib/selector";
+import { Link } from "@tanstack/react-router";
 
 function SidebarUserFooterSkeleton() {
   return (
@@ -31,16 +32,19 @@ function SidebarUserFooterContent() {
     <SidebarMenuButton
       size="lg"
       className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+      asChild
     >
-      <Avatar className="h-8 w-8 rounded-lg grayscale">
-        <AvatarFallback className="rounded-lg">{firstLetters}</AvatarFallback>
-      </Avatar>
-      <div className="grid flex-1 text-left text-sm leading-tight">
-        <span className="truncate font-medium">{user.display_name}</span>
-        <span className="text-muted-foreground truncate text-xs">
-          {user.user_name}
-        </span>
-      </div>
+      <Link to="/profile">
+        <Avatar className="h-8 w-8 rounded-lg grayscale">
+          <AvatarFallback className="rounded-lg">{firstLetters}</AvatarFallback>
+        </Avatar>
+        <div className="grid flex-1 text-left text-sm leading-tight">
+          <span className="truncate font-medium">{user.display_name}</span>
+          <span className="text-muted-foreground truncate text-xs">
+            {user.user_name}
+          </span>
+        </div>
+      </Link>
     </SidebarMenuButton>
   );
 }
