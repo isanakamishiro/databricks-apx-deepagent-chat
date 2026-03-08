@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './../routes/__root'
 import { Route as SidebarRouteRouteImport } from './../routes/_sidebar/route'
 import { Route as IndexRouteImport } from './../routes/index'
 import { Route as SidebarProfileRouteImport } from './../routes/_sidebar/profile'
+import { Route as SidebarChatIndexRouteImport } from './../routes/_sidebar/chat.index'
 import { Route as SidebarChatThreadIdRouteImport } from './../routes/_sidebar/chat.$threadId'
 
 const SidebarRouteRoute = SidebarRouteRouteImport.update({
@@ -28,6 +29,11 @@ const SidebarProfileRoute = SidebarProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => SidebarRouteRoute,
 } as any)
+const SidebarChatIndexRoute = SidebarChatIndexRouteImport.update({
+  id: '/chat/',
+  path: '/chat/',
+  getParentRoute: () => SidebarRouteRoute,
+} as any)
 const SidebarChatThreadIdRoute = SidebarChatThreadIdRouteImport.update({
   id: '/chat/$threadId',
   path: '/chat/$threadId',
@@ -38,11 +44,13 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/profile': typeof SidebarProfileRoute
   '/chat/$threadId': typeof SidebarChatThreadIdRoute
+  '/chat/': typeof SidebarChatIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/profile': typeof SidebarProfileRoute
   '/chat/$threadId': typeof SidebarChatThreadIdRoute
+  '/chat': typeof SidebarChatIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -50,18 +58,20 @@ export interface FileRoutesById {
   '/_sidebar': typeof SidebarRouteRouteWithChildren
   '/_sidebar/profile': typeof SidebarProfileRoute
   '/_sidebar/chat/$threadId': typeof SidebarChatThreadIdRoute
+  '/_sidebar/chat/': typeof SidebarChatIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/profile' | '/chat/$threadId'
+  fullPaths: '/' | '/profile' | '/chat/$threadId' | '/chat/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/profile' | '/chat/$threadId'
+  to: '/' | '/profile' | '/chat/$threadId' | '/chat'
   id:
     | '__root__'
     | '/'
     | '/_sidebar'
     | '/_sidebar/profile'
     | '/_sidebar/chat/$threadId'
+    | '/_sidebar/chat/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -92,6 +102,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SidebarProfileRouteImport
       parentRoute: typeof SidebarRouteRoute
     }
+    '/_sidebar/chat/': {
+      id: '/_sidebar/chat/'
+      path: '/chat'
+      fullPath: '/chat/'
+      preLoaderRoute: typeof SidebarChatIndexRouteImport
+      parentRoute: typeof SidebarRouteRoute
+    }
     '/_sidebar/chat/$threadId': {
       id: '/_sidebar/chat/$threadId'
       path: '/chat/$threadId'
@@ -105,11 +122,13 @@ declare module '@tanstack/react-router' {
 interface SidebarRouteRouteChildren {
   SidebarProfileRoute: typeof SidebarProfileRoute
   SidebarChatThreadIdRoute: typeof SidebarChatThreadIdRoute
+  SidebarChatIndexRoute: typeof SidebarChatIndexRoute
 }
 
 const SidebarRouteRouteChildren: SidebarRouteRouteChildren = {
   SidebarProfileRoute: SidebarProfileRoute,
   SidebarChatThreadIdRoute: SidebarChatThreadIdRoute,
+  SidebarChatIndexRoute: SidebarChatIndexRoute,
 }
 
 const SidebarRouteRouteWithChildren = SidebarRouteRoute._addFileChildren(

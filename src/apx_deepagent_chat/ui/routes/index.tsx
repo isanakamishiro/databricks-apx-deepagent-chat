@@ -1,11 +1,5 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
-  component: () => (
-    <Navigate
-      to="/chat/$threadId"
-      params={{ threadId: crypto.randomUUID() }}
-      replace
-    />
-  ),
+  component: () => <Navigate to="/chat" replace />,
 });

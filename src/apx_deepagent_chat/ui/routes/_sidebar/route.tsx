@@ -71,10 +71,7 @@ function Layout() {
   }, [userId, volumePath]);
 
   const handleNewChat = () => {
-    navigate({
-      to: "/chat/$threadId",
-      params: { threadId: crypto.randomUUID() },
-    });
+    navigate({ to: "/chat" });
   };
 
   const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
@@ -88,12 +85,9 @@ function Layout() {
         }
       );
       setChats((prev) => prev.filter((c) => c.id !== chatId));
-      // 削除したチャットが現在表示中なら新規チャットへ
+      // 削除したチャットが現在表示中なら初期画面へ
       if (chatId === activeThreadId) {
-        navigate({
-          to: "/chat/$threadId",
-          params: { threadId: crypto.randomUUID() },
-        });
+        navigate({ to: "/chat" });
       }
     } catch {
       // ignore
@@ -130,6 +124,7 @@ function Layout() {
                     navigate({
                       to: "/chat/$threadId",
                       params: { threadId: chat.id },
+                      search: { q: undefined },
                     })
                   }
                 >

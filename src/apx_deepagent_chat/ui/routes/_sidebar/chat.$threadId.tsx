@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Copy, RefreshCw } from "lucide-react";
 import {
@@ -38,15 +38,14 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
-  usePromptInputController,
 } from "@/components/ai-elements/prompt-input";
-import {
-  Suggestion,
-  Suggestions,
-} from "@/components/ai-elements/suggestion";
 import { SettingsDialog } from "@/components/chat/settings-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export const Route = createFileRoute("/_sidebar/chat/$threadId")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === "string" ? search.q : undefined,
+  }),
   component: () => <ChatPage />,
 });
 
@@ -82,13 +81,6 @@ const STORAGE_KEY_VOLUME = "apx_volume_path";
 const STORAGE_KEY_MODEL = "apx_selected_model";
 const STORAGE_KEY_USER = "apx_user_id";
 
-const STARTER_SUGGESTIONS = [
-  "最新のデータを分析してください",
-  "データを可視化してください",
-  "SQLクエリを書いてください",
-  "このデータセットを要約してください",
-];
-
 function getOrCreateUserId(): string {
   let id = localStorage.getItem(STORAGE_KEY_USER);
   if (!id) {
@@ -102,9 +94,16 @@ function getOrCreateUserId(): string {
 
 function ChatPage() {
   const { threadId } = Route.useParams();
+  const { q: initialQuery } = Route.useSearch();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const prevStreamingRef = useRef(false);
+  const initialQueryFiredRef = useRef(false);
+  const prevThreadIdRef = useRef<string | null>(null);
+  messagesRef.current = messages;
 
   const [volumePath, setVolumePath] = useState(
     () => localStorage.getItem(STORAGE_KEY_VOLUME) ?? ""
@@ -118,11 +117,17 @@ function ChatPage() {
 
   // threadId 変更時に履歴をロード
   useEffect(() => {
-    // 前のストリーミングを中断
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    setStreaming(false);
-    setMessages([]);
+    // 本物のthreadId変更時のみリセット（StrictModeの二重実行を無視）
+    const isNewThread = prevThreadIdRef.current !== threadId;
+    prevThreadIdRef.current = threadId;
+
+    if (isNewThread) {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      setStreaming(false);
+      setMessages([]);
+      initialQueryFiredRef.current = false;
+    }
 
     if (!userId) return;
 
@@ -137,13 +142,30 @@ function ChatPage() {
         return r.json();
       })
       .then((data) => {
-        if (data && Array.isArray(data.messages)) {
-          setMessages(data.messages as ChatMessage[]);
+        const msgs = Array.isArray(data) ? data : (data?.messages ?? []);
+        if (msgs.length > 0) {
+          setMessages(msgs as ChatMessage[]);
         }
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
+
+  // ストリーミング完了時にメッセージを永続化
+  useEffect(() => {
+    if (!streaming && prevStreamingRef.current && messagesRef.current.length > 0 && volumePath) {
+      fetch(`/api/chat-history/${threadId}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-uc-volume-path": volumePath,
+        },
+        body: JSON.stringify({ userId, messages: messagesRef.current }),
+      }).catch(() => {});
+    }
+    prevStreamingRef.current = streaming;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streaming]);
 
   // モデル一覧取得
   useEffect(() => {
@@ -403,14 +425,26 @@ function ChatPage() {
     }
   };
 
-  const hasMessages = messages.length > 0;
+  // search.q による初期メッセージの自動送信
+  useEffect(() => {
+    if (!initialQuery || initialQueryFiredRef.current) return;
+    initialQueryFiredRef.current = true;
+    // URLから q を除去（ブラウザ履歴に残さない）
+    navigate({
+      to: "/chat/$threadId",
+      params: { threadId },
+      search: { q: undefined },
+      replace: true,
+    });
+    handleSubmit(initialQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery]);
 
   return (
     <PromptInputProvider>
       <ChatContent
         messages={messages}
         streaming={streaming}
-        hasMessages={hasMessages}
         volumePath={volumePath}
         selectedModel={selectedModel}
         availableModels={availableModels}
@@ -428,7 +462,6 @@ function ChatPage() {
 type ChatContentProps = {
   messages: ChatMessage[];
   streaming: boolean;
-  hasMessages: boolean;
   volumePath: string;
   selectedModel: string;
   availableModels: string[];
@@ -441,7 +474,6 @@ type ChatContentProps = {
 function ChatContent({
   messages,
   streaming,
-  hasMessages,
   volumePath,
   selectedModel,
   availableModels,
@@ -450,14 +482,8 @@ function ChatContent({
   onSaveSettings,
   onModelChange,
 }: ChatContentProps) {
-  const { textInput } = usePromptInputController();
-
   const handleFormSubmit = ({ text }: { text: string; files: unknown[] }) => {
     onSubmit(text);
-  };
-
-  const handleSuggestionClick = (suggestion: string) => {
-    textInput.setInput(suggestion);
   };
 
   const promptInput = (
@@ -498,27 +524,6 @@ function ChatContent({
       </PromptInputFooter>
     </PromptInput>
   );
-
-  if (!hasMessages) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8 px-[20%] overflow-auto">
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">APX-Agent</h1>
-          <p className="text-muted-foreground text-sm">
-            何でも聞いてください
-          </p>
-        </div>
-        <div className="flex justify-center w-full max-w-2xl">
-          <Suggestions>
-            {STARTER_SUGGESTIONS.map((s) => (
-              <Suggestion key={s} suggestion={s} onClick={handleSuggestionClick} />
-            ))}
-          </Suggestions>
-        </div>
-        <div className="w-full max-w-2xl">{promptInput}</div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
@@ -574,6 +579,12 @@ function ChatContent({
                 <MessageContent>
                   {msg.isError ? (
                     <div className="text-destructive text-sm">{msg.content}</div>
+                  ) : msg.role === "assistant" && !msg.content && streaming && isLast ? (
+                    <div className="space-y-2 py-1">
+                      <Skeleton className="h-3 w-48" />
+                      <Skeleton className="h-3 w-64" />
+                      <Skeleton className="h-3 w-40" />
+                    </div>
                   ) : (
                     <MessageResponse>{msg.content}</MessageResponse>
                   )}
