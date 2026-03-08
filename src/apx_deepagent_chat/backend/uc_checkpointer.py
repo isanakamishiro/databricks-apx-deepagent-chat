@@ -722,27 +722,17 @@ class UCBundleCheckpointer(InMemorySaver):
     # ------------------------------------------------------------------
 
     def _load_bundle(self) -> None:
-        """Download bundle.json.gz (or legacy bundle.json) and populate InMemorySaver storage."""
-        legacy_path = self._bundle_path[:-3]  # .json.gz → .json
-
-        raw: bytes | None = None
-        for path, compressed in [(self._bundle_path, True), (legacy_path, False)]:
-            try:
-                resp = self._files.download(path)
-                if resp.contents is None:
-                    return
-                raw = resp.contents.read()
-                if compressed:
-                    raw = gzip.decompress(raw)
-                break
-            except (NotFound, ResourceDoesNotExist):
-                continue
-            except DatabricksError as e:
-                logger.warning("[bundle] load failed: %s", e)
+        """Download bundle.json.gz and populate InMemorySaver storage."""
+        try:
+            resp = self._files.download(self._bundle_path)
+            if resp.contents is None:
                 return
-
-        if raw is None:
-            return  # New conversation — nothing to load
+            raw = gzip.decompress(resp.contents.read())
+        except (NotFound, ResourceDoesNotExist):
+            return  # 新規会話 — nothing to load
+        except DatabricksError as e:
+            logger.warning("[bundle] load failed: %s", e)
+            return
 
         bundle = json.loads(raw.decode("utf-8"))
 
