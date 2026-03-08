@@ -17,8 +17,7 @@ from databricks_langchain import (
     DatabricksMultiServerMCPClient,
 )
 from deepagents import create_deep_agent
-from deepagents.backends import BackendProtocol, CompositeBackend, StateBackend, StoreBackend
-from deepagents.backends.protocol import EditResult, WriteResult
+from deepagents.backends import CompositeBackend, StoreBackend
 from deepagents.backends.utils import create_file_data
 from langgraph.store.memory import InMemoryStore
 from langchain.agents.middleware import wrap_model_call, wrap_tool_call
@@ -47,6 +46,8 @@ mlflow.langchain.autolog()
 MODEL = "databricks-qwen3-next-80b-a3b-instruct"
 USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
+_SYSTEM_PROMPT_PATH = ASSETS_DIR / "system_prompt.md"
+_SUBAGENTS_CONFIG_PATH = ASSETS_DIR / "subagents.yaml"
 _TEXT_SUFFIXES = {".md", ".py", ".txt"}
 
 
@@ -124,11 +125,6 @@ def _init_mcp_client(
                 url=f"{host_name}/api/2.0/mcp/functions/system/ai",
                 workspace_client=workspace_client,
             ),
-            # DatabricksMCPServer(
-            #     name="dbsql",
-            #     url=f"{host_name}/api/2.0/mcp/sql",
-            #     workspace_client=workspace_client,
-            # ),
         ]
     )
 
@@ -151,7 +147,6 @@ async def _get_mcp_tools(workspace_client: WorkspaceClient) -> list:
             return _mcp_tools_cache
         mcp_client = _init_mcp_client(workspace_client)
         tools = await mcp_client.get_tools()
-        # tools = [t for t in tools if t.name != "execute_sql"]
         _mcp_tools_cache = tools
         _mcp_tools_cached_at = time.monotonic()
         return tools
@@ -361,8 +356,8 @@ class _AgentPrewarm(LifespanDependency):
         try:
             await asyncio.gather(
                 _get_mcp_tools(get_sp_workspace_client()),
-                asyncio.to_thread(_load_subagents, ASSETS_DIR / "subagents.yaml"),
-                asyncio.to_thread(_load_system_prompt, ASSETS_DIR / "system_prompt.md"),
+                asyncio.to_thread(_load_subagents, _SUBAGENTS_CONFIG_PATH),
+                asyncio.to_thread(_load_system_prompt, _SYSTEM_PROMPT_PATH),
                 asyncio.to_thread(_load_preset_files),
             )
             _prewarm_logger.info("[prewarm] completed in %.3fs", time.monotonic() - t0)
@@ -373,14 +368,10 @@ class _AgentPrewarm(LifespanDependency):
 
 def _build_subagents(
     mcp_tools: list,
-    volume_path: str,
-    workspace_client: Optional[WorkspaceClient] = None,
     override_model=None,
 ) -> list:
     """Load subagent definitions from YAML and inject dynamic tools."""
-    ws_client = workspace_client or get_sp_workspace_client()
-
-    subagents = _load_subagents(ASSETS_DIR / "subagents.yaml")
+    subagents = _load_subagents(_SUBAGENTS_CONFIG_PATH)
     for sa in subagents:
         if override_model and "model" in sa:
             sa["model"] = override_model
@@ -408,13 +399,11 @@ async def init_agent(
     if not volume_path:
         raise ValueError("volume_path is required")
 
-    # mcp_tools = await _get_mcp_tools(ws_client)
+    # MCP ツールは常にサービスプリンシパルで取得（ユーザー認証不要なワークスペース全体のツール）
     mcp_tools = await _get_mcp_tools(get_sp_workspace_client())
 
     subagents = _build_subagents(
         mcp_tools=mcp_tools,
-        volume_path=volume_path,
-        workspace_client=ws_client,
         override_model=override_model,
     )
 
@@ -443,7 +432,7 @@ async def init_agent(
             web_fetch,
             get_current_time,
         ],
-        system_prompt=_load_system_prompt(ASSETS_DIR / "system_prompt.md"),
+        system_prompt=_load_system_prompt(_SYSTEM_PROMPT_PATH),
         memory=["/preset/AGENTS.md", "memories/instructions.md"],
         skills=["/preset/skills/", "skills/"],
         model=model,
@@ -499,18 +488,13 @@ async def streaming(
         workspace_client=get_sp_workspace_client(),
     )
 
-    # バンドルDLとエージェント初期化を並列実行
-    # init_agent はcheckpointerオブジェクト参照のみ必要（バンドルデータ不要）
-    agent, _ = await asyncio.gather(
-        init_agent(
+    async with checkpointer:
+        agent = await init_agent(
             user_workspace_client,
             checkpointer=checkpointer,
             volume_path=volume_path,
-        ),
-        checkpointer.__aenter__(),
-    )
+        )
 
-    try:
         all_messages = to_chat_completions_input([i.model_dump() for i in request.input])
         # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
         messages = {"messages": [all_messages[-1]] if all_messages else []}
@@ -534,5 +518,3 @@ async def streaming(
             max_context_tokens=max_ctx,
         ):
             yield event
-    finally:
-        await checkpointer.__aexit__(None, None, None)
