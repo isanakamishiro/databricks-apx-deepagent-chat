@@ -235,3 +235,6 @@ src/myapp/__dist__/
 screenshots/
 mlflow.db
 .github/
+.superpowers/
+
+package-lock.json
