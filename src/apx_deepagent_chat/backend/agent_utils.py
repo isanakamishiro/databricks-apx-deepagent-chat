@@ -333,40 +333,45 @@ def _detect_subagent_completions(
                     ResponsesAgentStreamEvent(
                         type="subagent.end",
                         name=sub.get("type") or "unknown",  # type: ignore[call-arg]
+                        call_id=msg.tool_call_id,  # type: ignore[call-arg]
                     )
                 )
 
 
 def _resolve_subagent_name(
     ns_key: str, active_subagents: dict[str, dict], data: Any
-) -> str:
-    """サブエージェントの名前を解決し、pending エントリを running に遷移させる.
+) -> tuple[str, str]:
+    """サブエージェントの名前と tool_call_id を解決し、pending エントリを running に遷移させる.
 
     LangGraph の ns フォーマット "tools:<tool_call_id>" を使ってまず直接解決を試みる。
     失敗した場合は pending エントリを線形探索し、最終的に data 内の AIMessage.name を参照する。
+
+    Returns:
+        (agent_name, tool_call_id) のタプル。tool_call_id は active_subagents のキーと一致する。
     """
     # LangGraph: ns_key = "tools:<tool_call_id>" から直接解決
     parts = ns_key.split(":", 1)
     if len(parts) == 2:
-        sub = active_subagents.get(parts[1])
+        tc_id = parts[1]
+        sub = active_subagents.get(tc_id)
         if sub and sub.get("status") == "pending":
             sub["status"] = "running"
-            return sub.get("type") or "unknown"
+            return sub.get("type") or "unknown", tc_id
 
-    # フォールバック: pending エントリを線形探索
-    for sub in active_subagents.values():
+    # フォールバック: pending エントリを線形探索（ns_key が UUID7 形式の場合など）
+    for tc_id, sub in active_subagents.items():
         if sub.get("status") == "pending":
             sub["status"] = "running"
-            return sub.get("type") or "unknown"
+            return sub.get("type") or "unknown", tc_id
 
     # フォールバック: data 内の AIMessage.name を参照
     for _, msgs in _iter_node_messages(data):
         for msg in msgs:
             if isinstance(msg, (AIMessage, AIMessageChunk)):
                 if name := getattr(msg, "name", None):
-                    return name
+                    return name, ""
 
-    return "unknown"
+    return "unknown", ""
 
 
 # ─── メインのストリーム処理関数 ──────────────────────────────────────────────
@@ -427,11 +432,14 @@ async def process_agent_astream_events(
                 ns_key = ns[0]
                 if ns_key not in seen_ns:
                     seen_ns.add(ns_key)
-                    agent_name = _resolve_subagent_name(ns_key, active_subagents, data)
+                    agent_name, subagent_call_id = _resolve_subagent_name(
+                        ns_key, active_subagents, data
+                    )
                     yield _log_and_yield(
                         ResponsesAgentStreamEvent(
                             type="subagent.start",
                             name=agent_name,  # type: ignore[call-arg]
+                            call_id=subagent_call_id,  # type: ignore[call-arg]
                         )
                     )
                 for item in _process_subagent_updates(data, _ua, state.output_items):

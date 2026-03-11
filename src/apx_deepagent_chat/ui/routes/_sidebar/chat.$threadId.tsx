@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { SubAgentBlock, type SubAgentBlockData } from "@/components/chat/subagent-block";
 import { Copy, RefreshCw } from "lucide-react";
 import {
   Message,
@@ -80,6 +81,7 @@ type ChatMessage = {
   content: string;
   thinking?: string;
   toolCallBlocks?: ToolCallBlock[];
+  subAgentBlocks?: SubAgentBlockData[];
   isError?: boolean;
   usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
   model?: string;
@@ -120,6 +122,7 @@ function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeSubagentCallIdRef = useRef<string | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const prevStreamingRef = useRef(false);
   const initialQueryFiredRef = useRef(false);
@@ -264,6 +267,7 @@ function ChatPage() {
 
     const ctrl = new AbortController();
     abortControllerRef.current = ctrl;
+    activeSubagentCallIdRef.current = null;
     setStreaming(true);
 
     try {
@@ -342,44 +346,155 @@ function ChatPage() {
                   }
                   return updated;
                 });
+              } else if (resolvedType === "subagent.start") {
+                const callId: string = data.call_id ?? "";
+                const agentType: string = data.name ?? "";
+                activeSubagentCallIdRef.current = callId;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last?.role === "assistant") {
+                    const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                      b.callId === callId
+                        ? { ...b, agentType, state: "running" as const }
+                        : b
+                    );
+                    updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                  }
+                  return updated;
+                });
+              } else if (resolvedType === "subagent.end") {
+                const callId: string = data.call_id ?? "";
+                activeSubagentCallIdRef.current = null;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last?.role === "assistant") {
+                    const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                      b.callId === callId
+                        ? { ...b, state: "done" as const }
+                        : b
+                    );
+                    updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                  }
+                  return updated;
+                });
               } else if (resolvedType === "response.output_item.done") {
                 const item = data.item ?? {};
                 if (item.type === "function_call") {
-                  const newBlock: ToolCallBlock = {
-                    callId: item.call_id ?? item.id ?? "",
-                    name: item.name ?? "",
-                    arguments: item.arguments ?? "",
-                    state: "input-available",
-                  };
+                  const activeCallId = activeSubagentCallIdRef.current;
+                  if (item.name === "task") {
+                    // task ツール → SubAgentBlock を作成（pending）
+                    const newSubAgent: SubAgentBlockData = {
+                      callId: item.call_id ?? item.id ?? "",
+                      agentType: "",
+                      toolCalls: [],
+                      state: "pending",
+                    };
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      if (last?.role === "assistant") {
+                        updated[updated.length - 1] = {
+                          ...last,
+                          subAgentBlocks: [
+                            ...(last.subAgentBlocks ?? []),
+                            newSubAgent,
+                          ],
+                        };
+                      }
+                      return updated;
+                    });
+                  } else if (activeCallId) {
+                    // サブエージェント内のツール呼び出し → 該当 SubAgentBlock に追加
+                    const newTool = {
+                      callId: item.call_id ?? item.id ?? "",
+                      name: item.name ?? "",
+                      arguments: item.arguments ?? "",
+                      state: "input-available" as ToolCallState,
+                    };
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      if (last?.role === "assistant") {
+                        const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                          b.callId === activeCallId
+                            ? { ...b, toolCalls: [...b.toolCalls, newTool] }
+                            : b
+                        );
+                        updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                      }
+                      return updated;
+                    });
+                  } else {
+                    // 通常のツール呼び出し
+                    const newBlock: ToolCallBlock = {
+                      callId: item.call_id ?? item.id ?? "",
+                      name: item.name ?? "",
+                      arguments: item.arguments ?? "",
+                      state: "input-available",
+                    };
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      if (last?.role === "assistant") {
+                        updated[updated.length - 1] = {
+                          ...last,
+                          toolCallBlocks: [
+                            ...(last.toolCallBlocks ?? []),
+                            newBlock,
+                          ],
+                        };
+                      }
+                      return updated;
+                    });
+                  }
+                } else if (item.type === "function_call_output") {
+                  const callId = item.call_id ?? "";
+                  const result = item.output ?? "";
+                  const activeCallId = activeSubagentCallIdRef.current;
                   setMessages((prev) => {
                     const updated = [...prev];
                     const last = updated[updated.length - 1];
                     if (last?.role === "assistant") {
-                      updated[updated.length - 1] = {
-                        ...last,
-                        toolCallBlocks: [
-                          ...(last.toolCallBlocks ?? []),
-                          newBlock,
-                        ],
-                      };
-                    }
-                    return updated;
-                  });
-                } else if (item.type === "function_call_output") {
-                  const callId = item.call_id ?? "";
-                  const result = item.output ?? "";
-                  setMessages((prev) => {
-                    const updated = [...prev];
-                    const last = updated[updated.length - 1];
-                    if (last?.role === "assistant" && last.toolCallBlocks) {
-                      updated[updated.length - 1] = {
-                        ...last,
-                        toolCallBlocks: last.toolCallBlocks.map((b) =>
-                          b.callId === callId
-                            ? { ...b, result, state: "output-available" as const }
+                      // サブエージェント内のツール結果
+                      if (activeCallId) {
+                        const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                          b.callId === activeCallId
+                            ? {
+                                ...b,
+                                toolCalls: b.toolCalls.map((t) =>
+                                  t.callId === callId
+                                    ? { ...t, result, state: "output-available" as ToolCallState }
+                                    : t
+                                ),
+                              }
                             : b
-                        ),
-                      };
+                        );
+                        updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                      } else {
+                        // task の完了結果か、通常ツールの結果かを判定
+                        const isSubagentResult = (last.subAgentBlocks ?? []).some(
+                          (b) => b.callId === callId
+                        );
+                        if (isSubagentResult) {
+                          // SubAgentBlock の result に保存
+                          const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                            b.callId === callId ? { ...b, result } : b
+                          );
+                          updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                        } else {
+                          // 通常ツールの結果
+                          updated[updated.length - 1] = {
+                            ...last,
+                            toolCallBlocks: (last.toolCallBlocks ?? []).map((b) =>
+                              b.callId === callId
+                                ? { ...b, result, state: "output-available" as const }
+                                : b
+                            ),
+                          };
+                        }
+                      }
                     }
                     return updated;
                   });
@@ -422,7 +537,7 @@ function ChatPage() {
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
-          if (last?.role === "assistant" && !last.content && !last.toolCallBlocks?.length) {
+          if (last?.role === "assistant" && !last.content && !last.toolCallBlocks?.length && !last.subAgentBlocks?.length) {
             return updated.slice(0, -1);
           }
           return updated;
@@ -597,9 +712,15 @@ function ChatContent({
                     <ReasoningContent>{msg.thinking}</ReasoningContent>
                   </Reasoning>
                 )}
-                {msg.toolCallBlocks && msg.toolCallBlocks.length > 0 && (
+                {(msg.subAgentBlocks?.length || msg.toolCallBlocks?.length) ? (
                   <div className="space-y-2 w-full">
-                    {msg.toolCallBlocks.map((block, bi) => {
+                    {msg.subAgentBlocks?.map((block, bi) => (
+                      <SubAgentBlock
+                        key={`sa-${bi}`}
+                        block={block}
+                      />
+                    ))}
+                    {msg.toolCallBlocks?.map((block, bi) => {
                       let parsedArgs: Record<string, unknown> = {};
                       try {
                         parsedArgs = JSON.parse(block.arguments || "{}");
@@ -607,7 +728,7 @@ function ChatContent({
                         parsedArgs = { raw: block.arguments };
                       }
                       return (
-                        <Tool key={bi}>
+                        <Tool key={`t-${bi}`}>
                           <ToolHeader
                             title={block.name}
                             type="tool-call"
@@ -630,7 +751,7 @@ function ChatContent({
                       );
                     })}
                   </div>
-                )}
+                ) : null}
                 <MessageContent>
                   {msg.isError ? (
                     <div className="text-destructive text-sm">{msg.content}</div>
