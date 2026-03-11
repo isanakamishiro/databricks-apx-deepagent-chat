@@ -1,8 +1,9 @@
 import SidebarLayout from "@/components/apx/sidebar-layout";
 import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
-import { MessageSquare, PenSquare, Trash2 } from "lucide-react";
+import { Loader2, MessageSquare, PenSquare, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -37,6 +38,7 @@ function getOrCreateUserId(): string {
 function Layout() {
   const navigate = useNavigate();
   const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   const volumePath = localStorage.getItem(STORAGE_KEY_VOLUME) ?? "";
   const userId = getOrCreateUserId();
@@ -48,6 +50,7 @@ function Layout() {
 
   const fetchChats = () => {
     if (!userId) return;
+    setIsLoading(true);
     fetch(
       `/api/chat-history?user_id=${encodeURIComponent(userId)}&limit=50`,
       {
@@ -60,7 +63,8 @@ function Layout() {
           setChats(data.chats);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
   };
 
   useEffect(() => {
@@ -99,53 +103,65 @@ function Layout() {
       <SidebarGroup>
         <SidebarGroupLabel className="flex items-center justify-between pr-1">
           <span>会話履歴</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5"
-            title="新しいチャット"
-            onClick={handleNewChat}
-          >
-            <PenSquare size={13} />
-          </Button>
+          <div className="flex items-center gap-1">
+            {isLoading && chats.length > 0 && (
+              <Loader2 size={12} className="animate-spin text-muted-foreground" />
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              title="新しいチャット"
+              onClick={handleNewChat}
+            >
+              <PenSquare size={13} />
+            </Button>
+          </div>
         </SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
-            {chats.map((chat) => (
-              <SidebarMenuItem key={chat.id}>
-                <div
-                  className={cn(
-                    "group w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm cursor-pointer",
-                    activeThreadId === chat.id
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  )}
-                  onClick={() =>
-                    navigate({
-                      to: "/chat/$threadId",
-                      params: { threadId: chat.id },
-                      search: { q: undefined },
-                    })
-                  }
-                >
-                  <MessageSquare size={13} className="shrink-0" />
-                  <span className="truncate flex-1">{chat.title}</span>
-                  <button
-                    className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                    onClick={(e) => handleDeleteChat(chat.id, e)}
-                    title="削除"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </SidebarMenuItem>
-            ))}
-            {chats.length === 0 && (
+            {isLoading && chats.length === 0 ? (
+              <div className="space-y-1 px-2">
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-full" />
+              </div>
+            ) : !isLoading && chats.length === 0 ? (
               <p className="px-2 py-2 text-xs text-muted-foreground">
                 {volumePath
                   ? "会話履歴がありません"
                   : "Volume Path を設定すると履歴が表示されます"}
               </p>
+            ) : (
+              chats.map((chat) => (
+                <SidebarMenuItem key={chat.id}>
+                  <div
+                    className={cn(
+                      "group w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm cursor-pointer",
+                      activeThreadId === chat.id
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    )}
+                    onClick={() =>
+                      navigate({
+                        to: "/chat/$threadId",
+                        params: { threadId: chat.id },
+                        search: { q: undefined },
+                      })
+                    }
+                  >
+                    <MessageSquare size={13} className="shrink-0" />
+                    <span className="truncate flex-1">{chat.title}</span>
+                    <button
+                      className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                      onClick={(e) => handleDeleteChat(chat.id, e)}
+                      title="削除"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </SidebarMenuItem>
+              ))
             )}
           </SidebarMenu>
         </SidebarGroupContent>
