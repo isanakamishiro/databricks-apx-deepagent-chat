@@ -30,6 +30,9 @@ from langchain_core.messages import HumanMessage
 from apx_deepagent_chat.backend.agent import init_agent
 from apx_deepagent_chat.backend.agent_utils import process_agent_astream_events
 
+import logging
+logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
+
 # --- 設定 ---
 
 USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
@@ -38,7 +41,7 @@ VOLUME_PATH = os.getenv("TEST_VOLUME_PATH", "")
 TEST_CASES = [
     {
         "name": "基本的な質問",
-        "message": "今日の日付を教えてください",
+        "message": "今日の日付を必ずサブエージェントを使って確認してください",
         "thread_id": "test-001",
     },
     # {
@@ -110,11 +113,15 @@ async def run_test_case(
             input=messages,
             config=config,
             stream_mode=["updates", "messages"],
+            # stream_mode=["updates"],
             subgraphs=True,
+            version="v2",
         ),
         usage_accumulator=usage_accumulator,
     ):
         etype = event.type
+        print(f"[イベント] {etype}")
+        print(f"イベント内容: {event}")
 
         # テキストデルタを収集
         if etype == "response.output_text.delta":

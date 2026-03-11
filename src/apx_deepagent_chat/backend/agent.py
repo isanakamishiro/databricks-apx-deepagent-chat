@@ -18,9 +18,8 @@ from databricks_langchain import (
     DatabricksMultiServerMCPClient,
 )
 from deepagents import create_deep_agent
-from deepagents.backends import CompositeBackend, StoreBackend, StateBackend
+from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.backends.utils import create_file_data
-from langgraph.store.memory import InMemoryStore
 from langchain.agents.middleware import wrap_model_call, wrap_tool_call
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import tool as langchain_tool
@@ -47,6 +46,7 @@ mlflow.langchain.autolog()
 mlflow.config.enable_async_logging()
 
 MODEL = "databricks-qwen3-next-80b-a3b-instruct"
+# MODEL = "databricks-gpt-oss-120b"
 USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 _SYSTEM_PROMPT_PATH = ASSETS_DIR / "system_prompt.md"
@@ -391,7 +391,7 @@ def _build_subagents(
     return subagents
 
 
-@mlflow.trace(span_type="UNKNOWN")
+# @mlflow.trace(span_type="UNKNOWN")
 async def init_agent(
     workspace_client: Optional[WorkspaceClient] = None,
     checkpointer=None,
@@ -523,6 +523,7 @@ async def streaming(
                 config=config,  # type: ignore[arg-type]
                 stream_mode=["updates", "messages"],
                 subgraphs=True,
+                version="v2",
             ),
             usage_accumulator=usage_accumulator,
             model=MODEL,
