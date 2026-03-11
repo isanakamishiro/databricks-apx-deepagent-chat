@@ -123,6 +123,7 @@ function ChatPage() {
   const messagesRef = useRef<ChatMessage[]>([]);
   const prevStreamingRef = useRef(false);
   const initialQueryFiredRef = useRef(false);
+  const persistedCountRef = useRef(0);
   const prevThreadIdRef = useRef<string | null>(null);
   messagesRef.current = messages;
 
@@ -148,6 +149,7 @@ function ChatPage() {
       setStreaming(false);
       setMessages([]);
       initialQueryFiredRef.current = false;
+      persistedCountRef.current = 0;
     }
 
     if (!userId) return;
@@ -168,6 +170,7 @@ function ChatPage() {
         const msgs = Array.isArray(data) ? data : (data?.messages ?? []);
         if (msgs.length > 0) {
           setMessages(msgs as ChatMessage[]);
+          persistedCountRef.current = msgs.length;
         }
       })
       .catch(() => {})
@@ -180,14 +183,18 @@ function ChatPage() {
   // ストリーミング完了時にメッセージを永続化
   useEffect(() => {
     if (!streaming && prevStreamingRef.current && messagesRef.current.length > 0 && volumePath) {
-      fetch(`/api/chat-history/${threadId}/messages`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-uc-volume-path": volumePath,
-        },
-        body: JSON.stringify({ userId, messages: messagesRef.current }),
-      }).catch(() => {});
+      const newMessages = messagesRef.current.slice(persistedCountRef.current);
+      if (newMessages.length > 0) {
+        fetch(`/api/chat-history/${threadId}/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-uc-volume-path": volumePath,
+          },
+          body: JSON.stringify({ userId, messages: newMessages }),
+        }).catch(() => {});
+        persistedCountRef.current = messagesRef.current.length;
+      }
     }
     prevStreamingRef.current = streaming;
     // eslint-disable-next-line react-hooks/exhaustive-deps
