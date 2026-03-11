@@ -28,7 +28,7 @@ dev = [
 ]
 
 [tool.apx.metadata]
-app-name = "apx-deepagent-chat"
+app-name = "APX DeepAgent Chat"
 app-slug = "apx_deepagent_chat"
 app-entrypoint = "apx_deepagent_chat.backend.app:app"
 api-prefix = "/api"

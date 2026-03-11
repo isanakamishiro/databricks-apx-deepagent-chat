@@ -199,9 +199,7 @@ class ChatHistoryStore:
     # Message CRUD
     # ------------------------------------------------------------------
 
-    def save_messages(
-        self, user_id: str, chat_id: str, messages: list[dict]
-    ) -> None:
+    def save_messages(self, user_id: str, chat_id: str, messages: list[dict]) -> None:
         """メッセージを保存 (upsert)."""
         existing = self._load_messages(user_id, chat_id)
         existing_by_id = {m.get("id"): m for m in existing}

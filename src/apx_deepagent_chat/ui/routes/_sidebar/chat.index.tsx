@@ -101,7 +101,7 @@ function ChatIndexContent() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8 px-[20%] overflow-auto">
       <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold">APX-Agent</h1>
+        <h1 className="text-2xl font-bold">APX DeepAgent Chat</h1>
         <p className="text-muted-foreground text-sm">何でも聞いてください</p>
       </div>
       <div className="flex justify-center w-full max-w-2xl">

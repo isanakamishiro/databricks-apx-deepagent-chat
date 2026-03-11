@@ -7,6 +7,9 @@ from pydantic import BaseModel
 from ..chat_history import ChatHistoryStore
 from ..core import Dependencies
 
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 def _get_history_store(volume_path: str, ws: WorkspaceClient) -> ChatHistoryStore:

@@ -18,7 +18,6 @@ async def version():
 def me(user_ws: Dependencies.UserClient):
     return user_ws.current_user.me()
 
-
 router.include_router(config_router)
 router.include_router(chat_history_router)
 router.include_router(files_router)

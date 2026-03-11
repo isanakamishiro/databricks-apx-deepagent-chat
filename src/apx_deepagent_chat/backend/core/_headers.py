@@ -6,7 +6,6 @@ from uuid import UUID
 from fastapi import Depends, Header
 from pydantic import BaseModel, SecretStr
 
-
 class DatabricksAppsHeaders(BaseModel):
     """Structured model for Databricks Apps HTTP headers.
 
@@ -32,6 +31,7 @@ def get_databricks_headers(
     token: Annotated[str | None, Header(alias="X-Forwarded-Access-Token")] = None,
 ) -> DatabricksAppsHeaders:
     """Extract Databricks Apps headers from the incoming request."""
+
     return DatabricksAppsHeaders(
         host=host,
         user_name=user_name,

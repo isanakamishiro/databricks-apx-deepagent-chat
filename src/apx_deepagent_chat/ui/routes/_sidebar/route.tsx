@@ -12,6 +12,16 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/_sidebar")({
   component: () => <Layout />,
@@ -39,6 +49,7 @@ function Layout() {
   const navigate = useNavigate();
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const volumePath = localStorage.getItem(STORAGE_KEY_VOLUME) ?? "";
   const userId = getOrCreateUserId();
@@ -78,8 +89,15 @@ function Layout() {
     navigate({ to: "/chat" });
   };
 
-  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const executeDelete = async (chatId: string) => {
+    // 楽観的UI: 即座にリストから非表示
+    const prevChats = chats;
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
+    // アクティブなチャットを削除した場合のみホームへ戻る
+    // 別のチャットを削除した場合は現在の画面をそのまま維持
+    if (chatId === activeThreadId) {
+      navigate({ to: "/chat" });
+    }
     try {
       await fetch(
         `/api/chat-history/${chatId}?user_id=${encodeURIComponent(userId)}`,
@@ -88,17 +106,25 @@ function Layout() {
           headers: volumePath ? { "x-uc-volume-path": volumePath } : {},
         }
       );
-      setChats((prev) => prev.filter((c) => c.id !== chatId));
-      // 削除したチャットが現在表示中なら初期画面へ
-      if (chatId === activeThreadId) {
-        navigate({ to: "/chat" });
-      }
     } catch {
-      // ignore
+      // API失敗時: リストをロールバック
+      setChats(prevChats);
+    }
+  };
+
+  const handleDeleteChat = (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (e.shiftKey) {
+      // Shift+クリック: ダイアログスキップ
+      executeDelete(chatId);
+    } else {
+      // 通常クリック: 確認ダイアログ表示
+      setPendingDeleteId(chatId);
     }
   };
 
   return (
+    <>
     <SidebarLayout defaultOpen={false} onLogoClick={handleNewChat}>
       <SidebarGroup>
         <SidebarGroupLabel className="flex items-center justify-between pr-1">
@@ -167,5 +193,36 @@ function Layout() {
         </SidebarGroupContent>
       </SidebarGroup>
     </SidebarLayout>
+
+    <AlertDialog
+      open={pendingDeleteId !== null}
+      onOpenChange={(open) => {
+        if (!open) setPendingDeleteId(null);
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>チャットを削除しますか？</AlertDialogTitle>
+          <AlertDialogDescription>
+            この操作は取り消せません。チャット履歴が完全に削除されます。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>キャンセル</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => {
+              if (pendingDeleteId) {
+                executeDelete(pendingDeleteId);
+                setPendingDeleteId(null);
+              }
+            }}
+          >
+            削除
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

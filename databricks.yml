@@ -14,6 +14,8 @@ variables:
     description: "MLflow experiment ID for apx-deepagent-chat"
   volume_full_name:
     description: "Full securable name of the Databricks UC volume to use for apx-deepagent-chat (e.g. workspace.default.test)"
+  mlflow_tracking_volume_full_name:
+    description: "Full securable name of the Databricks UC volume to use for mlflow tracking (e.g. workspace.default.mlflow-tracking)"
 
 # 環境変数BUNDLE_VAR_experiment_idとBUNDLE_VAR_volume_full_nameを事前に定義しておくこと
 resources:

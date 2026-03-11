@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
 
 import mlflow
+import mlflow.config
 import uuid_utils
 import yaml
 from databricks.sdk import WorkspaceClient
