@@ -5,6 +5,7 @@ from .models import VersionOut
 from .routers.chat_history import router as chat_history_router
 from .routers.config import router as config_router
 from .routers.files import router as files_router
+from .routers.volumes import router as volumes_router
 
 router = create_router()
 
@@ -21,3 +22,4 @@ def me(user_ws: Dependencies.UserClient):
 router.include_router(config_router)
 router.include_router(chat_history_router)
 router.include_router(files_router)
+router.include_router(volumes_router)
