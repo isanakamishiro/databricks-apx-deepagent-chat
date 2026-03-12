@@ -86,6 +86,7 @@ type ChatMessage = {
   isError?: boolean;
   usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
   model?: string;
+  maxInputTokens?: number;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -538,11 +539,13 @@ function ChatPage() {
                 const resp = data.response ?? {};
                 const usage = resp.usage;
                 const model = resp.model;
+                const rawMax = resp.metadata?.max_input_tokens;
+                const maxInputTokens = rawMax != null ? (Number.isFinite(Number(rawMax)) ? Number(rawMax) : undefined) : undefined;
                 setMessages((prev) => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
                   if (last?.role === "assistant") {
-                    updated[updated.length - 1] = { ...last, usage, model };
+                    updated[updated.length - 1] = { ...last, usage, model, maxInputTokens };
                   }
                   return updated;
                 });
@@ -826,7 +829,7 @@ function ChatContent({
                     {isLast && msg.usage && (
                       <Context
                         usedTokens={msg.usage.total_tokens}
-                        maxTokens={getModelMaxTokens(msg.model)}
+                        maxTokens={msg.maxInputTokens ?? getModelMaxTokens(msg.model)}
                         usage={{
                           inputTokens: msg.usage.input_tokens,
                           outputTokens: msg.usage.output_tokens,
