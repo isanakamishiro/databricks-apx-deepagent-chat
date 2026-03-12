@@ -50,7 +50,7 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
-import { SettingsDialog } from "@/components/chat/settings-dialog";
+import { VolumeExplorer } from "@/components/chat/volume-explorer";
 import { GeneratedFiles } from "@/components/chat/generated-files";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -635,7 +635,7 @@ function ChatPage() {
         onSubmit={handleSubmit}
         onStop={handleStop}
         onRetry={handleRetry}
-        onSaveSettings={handleSaveSettings}
+        onVolumeSelect={handleSaveSettings}
         onModelChange={handleModelChange}
       />
     </PromptInputProvider>
@@ -654,7 +654,7 @@ type ChatContentProps = {
   onSubmit: (text: string) => void;
   onStop: () => void;
   onRetry: () => void;
-  onSaveSettings: (vp: string) => void;
+  onVolumeSelect: (vp: string) => void;
   onModelChange: (model: string) => void;
 };
 
@@ -668,7 +668,7 @@ function ChatContent({
   onSubmit,
   onStop,
   onRetry,
-  onSaveSettings,
+  onVolumeSelect,
   onModelChange,
 }: ChatContentProps) {
   const handleFormSubmit = ({ text }: { text: string; files: unknown[] }) => {
@@ -705,10 +705,7 @@ function ChatContent({
               </PromptInputSelectContent>
             </PromptInputSelect>
           )}
-          <SettingsDialog
-            volumePath={volumePath}
-            onSave={onSaveSettings}
-          />
+          <VolumeExplorer value={volumePath} onSelect={onVolumeSelect} />
         </PromptInputTools>
         <PromptInputSubmit
           status={streaming ? "streaming" : undefined}
@@ -859,7 +856,14 @@ function ChatContent({
         <ConversationScrollButton />
       </Conversation>
       <div className="shrink-0 border-t p-4">
-        <div className="max-w-2xl mx-auto">{promptInput}</div>
+        <div className="max-w-2xl mx-auto">
+          {promptInput}
+          {volumePath ? (
+            <p className="mt-1 px-1 text-xs text-green-600">📂 {volumePath}</p>
+          ) : (
+            <p className="mt-1 px-1 text-xs text-muted-foreground">📂 ボリュームが未設定です</p>
+          )}
+        </div>
       </div>
     </div>
   );

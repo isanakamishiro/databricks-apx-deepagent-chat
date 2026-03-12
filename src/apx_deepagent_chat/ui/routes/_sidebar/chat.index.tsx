@@ -19,7 +19,7 @@ import {
   Suggestion,
   Suggestions,
 } from "@/components/ai-elements/suggestion";
-import { SettingsDialog } from "@/components/chat/settings-dialog";
+import { VolumeExplorer } from "@/components/chat/volume-explorer";
 
 export const Route = createFileRoute("/_sidebar/chat/")({
   component: () => <ChatIndexPage />,
@@ -88,7 +88,7 @@ function ChatIndexContent() {
     textInput.setInput(suggestion);
   };
 
-  const handleSaveSettings = (vp: string) => {
+  const handleVolumeSelect = (vp: string) => {
     setVolumePath(vp);
     localStorage.setItem(STORAGE_KEY_VOLUME, vp);
   };
@@ -137,11 +137,16 @@ function ChatIndexContent() {
                   </PromptInputSelectContent>
                 </PromptInputSelect>
               )}
-              <SettingsDialog volumePath={volumePath} onSave={handleSaveSettings} />
+              <VolumeExplorer value={volumePath} onSelect={handleVolumeSelect} />
             </PromptInputTools>
             <PromptInputSubmit />
           </PromptInputFooter>
         </PromptInput>
+        {volumePath ? (
+          <p className="mt-1 px-1 text-xs text-green-600">📂 {volumePath}</p>
+        ) : (
+          <p className="mt-1 px-1 text-xs text-muted-foreground">📂 ボリュームが未設定です</p>
+        )}
       </div>
     </div>
   );
