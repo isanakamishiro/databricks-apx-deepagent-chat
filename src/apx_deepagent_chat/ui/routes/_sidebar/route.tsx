@@ -2,7 +2,7 @@ import SidebarLayout from "@/components/apx/sidebar-layout";
 import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { Loader2, MessageSquare, PenSquare, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   SidebarGroup,
@@ -51,8 +51,8 @@ function Layout() {
   const [isLoading, setIsLoading] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
-  const volumePath = localStorage.getItem(STORAGE_KEY_VOLUME) ?? "";
   const userId = getOrCreateUserId();
+  const volumePath = localStorage.getItem(STORAGE_KEY_VOLUME) ?? "";
 
   // 現在のルートパスからthreadIdを取得
   const routerState = useRouterState();
@@ -61,11 +61,12 @@ function Layout() {
 
   const fetchChats = () => {
     if (!userId) return;
+    const currentVolumePath = localStorage.getItem(STORAGE_KEY_VOLUME) ?? "";
     setIsLoading(true);
     fetch(
       `/api/chat-history?user_id=${encodeURIComponent(userId)}&limit=50`,
       {
-        headers: volumePath ? { "x-uc-volume-path": volumePath } : {},
+        headers: currentVolumePath ? { "x-uc-volume-path": currentVolumePath } : {},
       }
     )
       .then((r) => r.json())
@@ -78,12 +79,18 @@ function Layout() {
       .finally(() => setIsLoading(false));
   };
 
+  const fetchChatsRef = useRef(fetchChats);
+  useEffect(() => {
+    fetchChatsRef.current = fetchChats;
+  });
+
   useEffect(() => {
     fetchChats();
-    window.addEventListener("chat-list-updated", fetchChats);
-    return () => window.removeEventListener("chat-list-updated", fetchChats);
+    const handler = () => fetchChatsRef.current();
+    window.addEventListener("chat-list-updated", handler);
+    return () => window.removeEventListener("chat-list-updated", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, volumePath]);
+  }, [userId]);
 
   const handleNewChat = () => {
     navigate({ to: "/chat" });

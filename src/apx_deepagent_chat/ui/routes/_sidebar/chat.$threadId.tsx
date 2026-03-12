@@ -264,6 +264,7 @@ function ChatPage() {
   const handleVolumeSelect = (vp: string) => {
     setVolumePath(vp);
     localStorage.setItem(STORAGE_KEY_VOLUME, vp);
+    window.location.href = '/chat';
   };
 
   const handleModelChange = (model: string) => {
@@ -858,11 +859,6 @@ function ChatContent({
       <div className="shrink-0 border-t p-4">
         <div className="max-w-2xl mx-auto">
           {promptInput}
-          {volumePath ? (
-            <p className="mt-1 px-1 text-xs text-green-600">📂 {volumePath}</p>
-          ) : (
-            <p className="mt-1 px-1 text-xs text-muted-foreground">📂 ボリュームが未設定です</p>
-          )}
         </div>
       </div>
     </div>

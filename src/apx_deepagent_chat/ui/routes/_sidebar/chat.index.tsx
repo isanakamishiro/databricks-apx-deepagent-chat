@@ -29,10 +29,9 @@ const STORAGE_KEY_VOLUME = "apx_volume_path";
 const STORAGE_KEY_MODEL = "apx_selected_model";
 
 const STARTER_SUGGESTIONS = [
-  "最新のデータを分析してください",
-  "データを可視化してください",
-  "SQLクエリを書いてください",
-  "このデータセットを要約してください",
+  "Databricksについて調査してくださ",
+  "LLMの仕組みを説明してください",
+  "大阪の今週の天気をHTML形式でレポートして",
 ];
 
 function ChatIndexPage() {
@@ -91,6 +90,7 @@ function ChatIndexContent() {
   const handleVolumeSelect = (vp: string) => {
     setVolumePath(vp);
     localStorage.setItem(STORAGE_KEY_VOLUME, vp);
+    window.location.href = '/chat';
   };
 
   const handleModelChange = (model: string) => {
@@ -142,11 +142,6 @@ function ChatIndexContent() {
             <PromptInputSubmit />
           </PromptInputFooter>
         </PromptInput>
-        {volumePath ? (
-          <p className="mt-1 px-1 text-xs text-green-600">📂 {volumePath}</p>
-        ) : (
-          <p className="mt-1 px-1 text-xs text-muted-foreground">📂 ボリュームが未設定です</p>
-        )}
       </div>
     </div>
   );

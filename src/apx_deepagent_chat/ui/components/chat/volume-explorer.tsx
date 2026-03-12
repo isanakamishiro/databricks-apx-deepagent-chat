@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   Files,
+  FilesHighlight,
   FolderItem,
   FolderHeader,
   FolderTrigger,
@@ -32,16 +33,21 @@ type VolumeExplorerProps = {
   onSelect: (path: string) => void;
 };
 
+function parsePath(path: string): { catalog: string; schema: string } | null {
+  const m = path.match(/^\/Volumes\/([^/]+)\/([^/]+)\/[^/]+$/);
+  if (!m) return null;
+  return { catalog: m[1], schema: m[2] };
+}
+
 export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
   const [open, setOpen] = useState(false);
   const [pendingPath, setPendingPath] = useState(value);
+  const [openFolders, setOpenFolders] = useState<string[]>([]);
 
   const [catalogs, setCatalogs] = useState<Entry[]>([]);
   const [catalogState, setCatalogState] = useState<LoadState>('idle');
   const [schemas, setSchemas] = useState<Record<string, { state: LoadState; data: Entry[] }>>({});
   const [volumes, setVolumes] = useState<Record<string, { state: LoadState; data: Entry[] }>>({});
-
-  const volumeName = value ? value.split('/').pop() : undefined;
 
   const loadCatalogs = async () => {
     if (catalogState !== 'idle') return;
@@ -123,24 +129,35 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
     });
   };
 
-  const handleDialogOpen = (isOpen: boolean) => {
+  const handleDialogOpen = async (isOpen: boolean) => {
     setOpen(isOpen);
     if (isOpen) {
       setPendingPath(value);
-      loadCatalogs();
+      await loadCatalogs();
+      const parsed = parsePath(value);
+      if (parsed) {
+        setOpenFolders([parsed.catalog, `${parsed.catalog}/${parsed.schema}`]);
+        await loadSchemas(parsed.catalog);
+        await loadVolumes(parsed.catalog, parsed.schema);
+      } else {
+        setOpenFolders([]);
+      }
     }
   };
 
   return (
     <>
       <Button
-        variant={volumeName ? 'outline' : 'ghost'}
+        variant="ghost"
         size="sm"
-        className={cn('h-7 text-xs gap-1', volumeName && 'border-primary text-primary')}
+        className={cn(
+          'h-7 text-xs gap-1 max-w-xs border-none bg-transparent font-medium text-muted-foreground shadow-none transition-colors hover:bg-accent hover:text-foreground',
+          value && 'text-foreground'
+        )}
         onClick={() => handleDialogOpen(true)}
       >
         <Database size={12} />
-        {volumeName ?? 'Volume'}
+        <span className="truncate">{value || '未選択'}</span>
       </Button>
       <Dialog open={open} onOpenChange={handleDialogOpen}>
         <DialogContent className="sm:max-w-md">
@@ -163,7 +180,8 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
               <p className="text-muted-foreground p-2 text-xs">アクセス可能なカタログがありません</p>
             )}
             {catalogState === 'loaded' && catalogs.length > 0 && (
-              <Files>
+              <FilesHighlight>
+              <Files open={openFolders} onOpenChange={setOpenFolders}>
                 {catalogs.map((cat) => (
                   <FolderItem key={cat.name} value={cat.name}>
                     <FolderHeader onClick={() => loadSchemas(cat.name)}>
@@ -217,6 +235,7 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
                   </FolderItem>
                 ))}
               </Files>
+              </FilesHighlight>
             )}
           </div>
 
@@ -224,19 +243,36 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
             <p className="truncate text-xs text-green-600">📍 {pendingPath}</p>
           )}
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              キャンセル
-            </Button>
-            <Button
-              onClick={() => {
-                onSelect(pendingPath);
-                setOpen(false);
-              }}
-              disabled={!pendingPath}
-            >
-              選択
-            </Button>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              {value && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => {
+                    onSelect('');
+                    setOpen(false);
+                  }}
+                >
+                  選択を解除
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setOpen(false)}>
+                キャンセル
+              </Button>
+              <Button
+                onClick={() => {
+                  onSelect(pendingPath);
+                  setOpen(false);
+                }}
+                disabled={!pendingPath}
+              >
+                選択
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
