@@ -24,6 +24,7 @@ from deepagents.middleware.summarization import (
     create_summarization_tool_middleware,
 )
 from langchain.agents.middleware import wrap_model_call, wrap_tool_call
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import tool as langchain_tool
 from mlflow.genai.agent_server import invoke, stream
@@ -51,6 +52,7 @@ mlflow.config.enable_async_logging()
 MODEL = "databricks-qwen3-next-80b-a3b-instruct"
 # MODEL = "databricks-gpt-oss-120b"
 USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
+FAKE_MODEL_NAME = "_fake-model-for-testing"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 _SYSTEM_PROMPT_PATH = ASSETS_DIR / "system_prompt.md"
 _SUBAGENTS_CONFIG_PATH = ASSETS_DIR / "subagents.yaml"
@@ -386,10 +388,14 @@ def _build_subagents(
     return subagents
 
 
-def init_model(ws: WorkspaceClient, model_name: str = MODEL):
+def init_model(model_name: str = MODEL, ws: Optional[WorkspaceClient] = None):
+    if model_name == FAKE_MODEL_NAME:
+        return _make_fake_model()
+
+    ws_client = ws or get_sp_workspace_client()
     model = ChatDatabricks(
         model=MODEL,
-        workspace_client=ws,
+        workspace_client=ws_client,
         temperature=0,
         use_responses_api=False,
     )
@@ -408,14 +414,12 @@ def init_model(ws: WorkspaceClient, model_name: str = MODEL):
 
 @mlflow.trace(span_type="UNKNOWN")
 async def init_agent(
+    model: BaseChatModel,
     workspace_client: Optional[WorkspaceClient] = None,
     checkpointer=None,
     volume_path: Optional[str] = None,
-    override_model=None,
+    override_subagent_model: Optional[BaseChatModel] = None,
 ):
-    # 開発モード: USE_FAKE_MODEL=true の場合は FakeListChatModel を使用
-    if override_model is None and USE_FAKE_MODEL:
-        override_model = _make_fake_model()
 
     ws_client = workspace_client or get_sp_workspace_client()
     if not volume_path:
@@ -426,10 +430,8 @@ async def init_agent(
 
     subagents = _build_subagents(
         mcp_tools=mcp_tools,
-        override_model=override_model,
+        override_model=override_subagent_model,
     )
-
-    model = override_model or init_model(ws_client, MODEL)
 
     backend = lambda rt: CompositeBackend(
         default=UCVolumesBackend(
@@ -479,6 +481,9 @@ async def non_streaming(request: ResponsesAgentRequest) -> ResponsesAgentRespons
         # model
         if completed_response.get("model"):
             kwargs["model"] = completed_response["model"]
+        # metadata
+        if metadata := completed_response.get("metadata", {}):
+            kwargs["metadata"] = metadata
         # usage (ResponseUsage 形式)
         u = completed_response.get("usage", {})
         if u:
@@ -508,10 +513,17 @@ async def streaming(
     )
 
     async with checkpointer:
+        model = init_model(
+            model_name=MODEL if not USE_FAKE_MODEL else FAKE_MODEL_NAME,
+            ws=user_workspace_client,
+        )
+        override_model = None if not USE_FAKE_MODEL else model
         agent = await init_agent(
-            user_workspace_client,
+            model=model,
+            workspace_client=user_workspace_client,
             checkpointer=checkpointer,
             volume_path=volume_path,
+            override_subagent_model=override_model,
         )
 
         all_messages = to_chat_completions_input(
@@ -540,6 +552,6 @@ async def streaming(
             ),
             usage_accumulator=usage_accumulator,
             model=MODEL,
-            max_context_tokens=max_ctx,
+            model_profile=model.profile if hasattr(model, "profile") else None,
         ):
             yield event

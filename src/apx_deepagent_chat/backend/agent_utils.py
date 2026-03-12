@@ -246,7 +246,7 @@ def _finalize_stream(
     state: _StreamState,
     ua: dict,
     model: str | None,
-    max_context_tokens: int | None,
+    max_input_tokens: int | None,
 ) -> Iterator[ResponsesAgentStreamEvent]:
     """ストリーム完了後の response.output_item.done と response.completed を emit する."""
     if state.accumulated_text:
@@ -277,8 +277,10 @@ def _finalize_stream(
     }
     if model is not None:
         response_data["model"] = model
-    if max_context_tokens is not None:
-        response_data["max_context_tokens"] = max_context_tokens
+
+    response_data["metadata"] = {}
+    if max_input_tokens is not None:
+        response_data["metadata"]["max_input_tokens"] = str(max_input_tokens)
 
     yield _log_and_yield(
         ResponsesAgentStreamEvent(
@@ -381,7 +383,7 @@ async def process_agent_astream_events(
     async_stream: AsyncIterator[Any],
     usage_accumulator: dict[str, int] | None = None,
     model: str | None = None,
-    max_context_tokens: int | None = None,
+    model_profile: dict[str, Any] | None = None,
 ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
     """agent.astream() のストリームを受け取り ResponsesAgentStreamEvent を yield する.
 
@@ -450,7 +452,9 @@ async def process_agent_astream_events(
         len(state.accumulated_text),
         len(state.output_items),
     )
-    for item in _finalize_stream(state, _ua, model, max_context_tokens):
+
+    max_input_tokens = model_profile.get("max_input_tokens") if model_profile else None
+    for item in _finalize_stream(state, _ua, model, max_input_tokens):
         yield item
 
 

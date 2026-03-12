@@ -27,8 +27,8 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 from langchain_core.messages import HumanMessage
 
-from apx_deepagent_chat.backend.agent import init_agent
-from apx_deepagent_chat.backend.agent_utils import process_agent_astream_events
+from apx_deepagent_chat.backend.agent import init_agent, init_model, MODEL
+from apx_deepagent_chat.backend.agent_utils import process_agent_astream_events, get_user_workspace_client
 
 import logging
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
@@ -90,10 +90,18 @@ async def run_test_case(
     print(f"メッセージ: {message}")
     print("-" * 50)
 
+    user_workspace_client = get_user_workspace_client()
+    model = init_model(user_workspace_client, MODEL)
+    if override_model:
+        print(f"*** モデルを {override_model.__class__.__name__} にオーバーライドして実行 ***")
+        model = override_model
+
     agent = await init_agent(
+        model=model,
+        workspace_client=user_workspace_client,
         checkpointer=None,
         volume_path=volume_path,
-        override_model=override_model,
+        override_subagent_model=override_model,
     )
 
     messages = {"messages": [HumanMessage(content=message)]}
