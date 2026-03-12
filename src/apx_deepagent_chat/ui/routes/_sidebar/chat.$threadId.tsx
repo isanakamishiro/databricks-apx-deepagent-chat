@@ -261,7 +261,7 @@ function ChatPage() {
     setStreaming(false);
   };
 
-  const handleSaveSettings = (vp: string) => {
+  const handleVolumeSelect = (vp: string) => {
     setVolumePath(vp);
     localStorage.setItem(STORAGE_KEY_VOLUME, vp);
   };
@@ -635,7 +635,7 @@ function ChatPage() {
         onSubmit={handleSubmit}
         onStop={handleStop}
         onRetry={handleRetry}
-        onVolumeSelect={handleSaveSettings}
+        onVolumeSelect={handleVolumeSelect}
         onModelChange={handleModelChange}
       />
     </PromptInputProvider>
