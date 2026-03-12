@@ -86,6 +86,43 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
     }
   };
 
+  const renderVolumeItems = (cat: Entry, sc: Entry) => {
+    const key = `${cat.name}/${sc.name}`;
+    const vs = volumes[key];
+    if (vs?.state === 'loading')
+      return (
+        <div className="space-y-1 py-1">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+      );
+    if (vs?.state === 'error')
+      return <p className="text-destructive py-1 text-xs">取得に失敗しました</p>;
+    if (vs?.state === 'loaded' && vs.data.length === 0)
+      return (
+        <p className="text-muted-foreground py-1 text-xs">ボリュームがありません</p>
+      );
+    return vs?.data.map((vol) => {
+      const path = `/Volumes/${cat.name}/${sc.name}/${vol.name}`;
+      const isSelected = pendingPath === path;
+      return (
+        <FileHighlight key={vol.name}>
+          <File
+            className={cn(
+              'flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 hover:bg-accent',
+              isSelected && 'bg-primary/10 font-medium text-primary'
+            )}
+            onClick={() => setPendingPath(path)}
+          >
+            <HardDrive size={13} />
+            <FileLabel>{vol.name}</FileLabel>
+            {isSelected && <span className="ml-auto text-xs">✓</span>}
+          </File>
+        </FileHighlight>
+      );
+    });
+  };
+
   const handleDialogOpen = (isOpen: boolean) => {
     setOpen(isOpen);
     if (isOpen) {
@@ -172,42 +209,7 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
                               </FolderTrigger>
                             </FolderHeader>
                             <FolderPanel className="ml-5 border-l pl-2">
-                              {(() => {
-                                const key = `${cat.name}/${sc.name}`;
-                                const vs = volumes[key];
-                                if (vs?.state === 'loading')
-                                  return (
-                                    <div className="space-y-1 py-1">
-                                      <Skeleton className="h-4 w-full" />
-                                      <Skeleton className="h-4 w-3/4" />
-                                    </div>
-                                  );
-                                if (vs?.state === 'error')
-                                  return <p className="text-destructive py-1 text-xs">取得に失敗しました</p>;
-                                if (vs?.state === 'loaded' && vs.data.length === 0)
-                                  return (
-                                    <p className="text-muted-foreground py-1 text-xs">ボリュームがありません</p>
-                                  );
-                                return vs?.data.map((vol) => {
-                                  const path = `/Volumes/${cat.name}/${sc.name}/${vol.name}`;
-                                  const isSelected = pendingPath === path;
-                                  return (
-                                    <FileHighlight key={vol.name}>
-                                      <File
-                                        className={cn(
-                                          'flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 hover:bg-accent',
-                                          isSelected && 'bg-primary/10 font-medium text-primary'
-                                        )}
-                                        onClick={() => setPendingPath(path)}
-                                      >
-                                        <HardDrive size={13} />
-                                        <FileLabel>{vol.name}</FileLabel>
-                                        {isSelected && <span className="ml-auto text-xs">✓</span>}
-                                      </File>
-                                    </FileHighlight>
-                                  );
-                                });
-                              })()}
+                              {renderVolumeItems(cat, sc)}
                             </FolderPanel>
                           </FolderItem>
                         ))}
