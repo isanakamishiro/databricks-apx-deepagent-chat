@@ -20,6 +20,8 @@ import {
   Suggestions,
 } from "@/components/ai-elements/suggestion";
 import { VolumeExplorer } from "@/components/chat/volume-explorer";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertTriangle } from "lucide-react";
 
 export const Route = createFileRoute("/_sidebar/chat/")({
   component: () => <ChatIndexPage />,
@@ -29,8 +31,8 @@ const STORAGE_KEY_VOLUME = "apx_volume_path";
 const STORAGE_KEY_MODEL = "apx_selected_model";
 
 const STARTER_SUGGESTIONS = [
-  "Databricksについて調査してくださ",
-  "LLMの仕組みを説明してください",
+  "Databricksについて調査して",
+  "LLMの仕組みを説明して",
   "大阪の今週の天気をHTML形式でレポートして",
 ];
 
@@ -100,6 +102,16 @@ function ChatIndexContent() {
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8 px-[20%] overflow-auto">
+      {!volumePath && (
+        <Alert variant="warning" className="w-full max-w-2xl">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            Volume Path が未設定です。チャット履歴が保存されません。ツールバーの
+            <span className="font-medium">「Volume」</span>
+            ボタンから設定してください。
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="text-center space-y-2">
         <h1 className="text-2xl font-bold">APX DeepAgent Chat</h1>
         <p className="text-muted-foreground text-sm">何でも聞いてください</p>

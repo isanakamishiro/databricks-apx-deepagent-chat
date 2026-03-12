@@ -20,7 +20,16 @@ interface SidebarLayoutProps {
   onLogoClick?: () => void;
 }
 
-function SidebarLayout({ children, defaultOpen = true, onLogoClick }: SidebarLayoutProps) {
+// Cookieからサイドバーの初期状態を読み込むヘルパー
+function getSidebarDefaultOpen(): boolean {
+  const match = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith("sidebar_state="));
+  if (match) return match.split("=")[1] === "true";
+  return true; // Cookie未設定時はデフォルトで開く
+}
+
+function SidebarLayout({ children, defaultOpen = getSidebarDefaultOpen(), onLogoClick }: SidebarLayoutProps) {
   return (
     <SidebarProvider defaultOpen={defaultOpen}>
       <Sidebar>

@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { SubAgentBlock, type SubAgentBlockData } from "@/components/chat/subagent-block";
-import { Copy, RefreshCw } from "lucide-react";
+import { AlertCircle, Copy, RefreshCw } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Message,
   MessageAction,
@@ -790,7 +791,10 @@ function ChatContent({
                 ) : null}
                 <MessageContent>
                   {msg.isError ? (
-                    <div className="text-destructive text-sm">{msg.content}</div>
+                    <Alert variant="destructive" className="w-full">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{msg.content}</AlertDescription>
+                    </Alert>
                   ) : msg.role === "assistant" && !msg.content && streaming && isLast ? (
                     <div className="space-y-2 py-1">
                       <Skeleton className="h-3 w-48" />
