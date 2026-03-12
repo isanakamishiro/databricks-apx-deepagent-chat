@@ -16,6 +16,9 @@ export interface Body_filesUpload {
     file: string;
     path: string;
 }
+export interface CatalogOut {
+    name: string;
+}
 export interface ComplexValue {
     display?: string | null;
     primary?: boolean | null;
@@ -44,6 +47,9 @@ export interface SaveMessagesRequest {
     messages: Record<string, unknown>[];
     userId: string;
 }
+export interface SchemaOut {
+    name: string;
+}
 export interface User {
     active?: boolean | null;
     display_name?: string | null;
@@ -71,6 +77,9 @@ export interface ValidationError {
 }
 export interface VersionOut {
     version: string;
+}
+export interface VolumeOut {
+    name: string;
 }
 export const agent_info_endpoint_agent_info_get = async (options?: RequestInit): Promise<{
     data: Record<string, unknown>;
@@ -1219,6 +1228,270 @@ export function useVersionSuspense<TData = {
     return useSuspenseQuery({
         queryKey: versionKey(),
         queryFn: ()=>version(),
+        ...options?.query
+    });
+}
+export interface ListCatalogsParams {
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const listCatalogs = async (params?: ListCatalogsParams, options?: RequestInit): Promise<{
+    data: CatalogOut[];
+}> =>{
+    const res = await fetch("/api/volumes/catalogs", {
+        ...options,
+        method: "GET",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export const listCatalogsKey = (params?: ListCatalogsParams)=>{
+    return [
+        "/api/volumes/catalogs",
+        params
+    ] as const;
+};
+export function useListCatalogs<TData = {
+    data: CatalogOut[];
+}>(options?: {
+    params?: ListCatalogsParams;
+    query?: Omit<UseQueryOptions<{
+        data: CatalogOut[];
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useQuery({
+        queryKey: listCatalogsKey(options?.params),
+        queryFn: ()=>listCatalogs(options?.params),
+        ...options?.query
+    });
+}
+export function useListCatalogsSuspense<TData = {
+    data: CatalogOut[];
+}>(options?: {
+    params?: ListCatalogsParams;
+    query?: Omit<UseSuspenseQueryOptions<{
+        data: CatalogOut[];
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useSuspenseQuery({
+        queryKey: listCatalogsKey(options?.params),
+        queryFn: ()=>listCatalogs(options?.params),
+        ...options?.query
+    });
+}
+export interface ListSchemasParams {
+    catalog: string;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const listSchemas = async (params: ListSchemasParams, options?: RequestInit): Promise<{
+    data: SchemaOut[];
+}> =>{
+    const searchParams = new URLSearchParams();
+    if (params.catalog != null) searchParams.set("catalog", String(params.catalog));
+    const queryString = searchParams.toString();
+    const url = queryString ? `/api/volumes/schemas?${queryString}` : "/api/volumes/schemas";
+    const res = await fetch(url, {
+        ...options,
+        method: "GET",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export const listSchemasKey = (params?: ListSchemasParams)=>{
+    return [
+        "/api/volumes/schemas",
+        params
+    ] as const;
+};
+export function useListSchemas<TData = {
+    data: SchemaOut[];
+}>(options: {
+    params: ListSchemasParams;
+    query?: Omit<UseQueryOptions<{
+        data: SchemaOut[];
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useQuery({
+        queryKey: listSchemasKey(options.params),
+        queryFn: ()=>listSchemas(options.params),
+        ...options?.query
+    });
+}
+export function useListSchemasSuspense<TData = {
+    data: SchemaOut[];
+}>(options: {
+    params: ListSchemasParams;
+    query?: Omit<UseSuspenseQueryOptions<{
+        data: SchemaOut[];
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useSuspenseQuery({
+        queryKey: listSchemasKey(options.params),
+        queryFn: ()=>listSchemas(options.params),
+        ...options?.query
+    });
+}
+export interface ListVolumesParams {
+    catalog: string;
+    schema: string;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const listVolumes = async (params: ListVolumesParams, options?: RequestInit): Promise<{
+    data: VolumeOut[];
+}> =>{
+    const searchParams = new URLSearchParams();
+    if (params.catalog != null) searchParams.set("catalog", String(params.catalog));
+    if (params.schema != null) searchParams.set("schema", String(params.schema));
+    const queryString = searchParams.toString();
+    const url = queryString ? `/api/volumes/volumes?${queryString}` : "/api/volumes/volumes";
+    const res = await fetch(url, {
+        ...options,
+        method: "GET",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export const listVolumesKey = (params?: ListVolumesParams)=>{
+    return [
+        "/api/volumes/volumes",
+        params
+    ] as const;
+};
+export function useListVolumes<TData = {
+    data: VolumeOut[];
+}>(options: {
+    params: ListVolumesParams;
+    query?: Omit<UseQueryOptions<{
+        data: VolumeOut[];
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useQuery({
+        queryKey: listVolumesKey(options.params),
+        queryFn: ()=>listVolumes(options.params),
+        ...options?.query
+    });
+}
+export function useListVolumesSuspense<TData = {
+    data: VolumeOut[];
+}>(options: {
+    params: ListVolumesParams;
+    query?: Omit<UseSuspenseQueryOptions<{
+        data: VolumeOut[];
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useSuspenseQuery({
+        queryKey: listVolumesKey(options.params),
+        queryFn: ()=>listVolumes(options.params),
         ...options?.query
     });
 }

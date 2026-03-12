@@ -91,7 +91,7 @@ async def run_test_case(
     print("-" * 50)
 
     user_workspace_client = get_user_workspace_client()
-    model = init_model(user_workspace_client, MODEL)
+    model = init_model(MODEL, user_workspace_client)
     if override_model:
         print(f"*** モデルを {override_model.__class__.__name__} にオーバーライドして実行 ***")
         model = override_model
