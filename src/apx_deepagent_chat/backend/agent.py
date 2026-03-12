@@ -20,6 +20,9 @@ from databricks_langchain import (
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.backends.utils import create_file_data
+from deepagents.middleware.summarization import (
+    create_summarization_tool_middleware,
+)
 from langchain.agents.middleware import wrap_model_call, wrap_tool_call
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import tool as langchain_tool
@@ -337,14 +340,6 @@ def _load_preset_files() -> dict[str, Any]:
     return files
 
 
-# def _init_preset_store() -> InMemoryStore:
-#     """キャッシュ済みファイルデータから新しい InMemoryStore を構築して返す。"""
-#     store = InMemoryStore()
-#     for key, value in _load_preset_files().items():
-#         store.put(namespace=("filesystem",), key=key, value=value)
-#     return store
-
-
 # --- スタートアップ時プリウォーム ---
 _prewarm_logger = logging.getLogger(__name__)
 
@@ -391,7 +386,27 @@ def _build_subagents(
     return subagents
 
 
-# @mlflow.trace(span_type="UNKNOWN")
+def init_model(ws: WorkspaceClient, model_name: str = MODEL):
+    model = ChatDatabricks(
+        model=MODEL,
+        workspace_client=ws,
+        temperature=0,
+        use_responses_api=False,
+    )
+    if not model.profile:
+        model.profile = {
+            "max_input_tokens": 200000,
+            "max_output_tokens": 10000,
+            "text_inputs": True,
+            "tool_choice": True,
+            "tool_calling": True,
+            "structured_output": True,
+            "text_outputs": True,
+        }
+    return model
+
+
+@mlflow.trace(span_type="UNKNOWN")
 async def init_agent(
     workspace_client: Optional[WorkspaceClient] = None,
     checkpointer=None,
@@ -414,14 +429,8 @@ async def init_agent(
         override_model=override_model,
     )
 
-    model = override_model or ChatDatabricks(
-        endpoint=MODEL,
-        workspace_client=ws_client,
-        temperature=0,
-        use_responses_api=False,
-    )
+    model = override_model or init_model(ws_client, MODEL)
 
-    # preset_store = _init_preset_store()
     backend = lambda rt: CompositeBackend(
         default=UCVolumesBackend(
             volume_path=volume_path,
@@ -446,7 +455,11 @@ async def init_agent(
         backend=backend,
         subagents=subagents,
         checkpointer=checkpointer,
-        middleware=[strip_content_block_ids, flatten_system_message],
+        middleware=[
+            strip_content_block_ids,
+            flatten_system_message,
+            create_summarization_tool_middleware(model, backend),
+        ],
     )
 
 

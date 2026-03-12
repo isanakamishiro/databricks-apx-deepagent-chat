@@ -51,6 +51,7 @@ import {
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { SettingsDialog } from "@/components/chat/settings-dialog";
+import { GeneratedFiles } from "@/components/chat/generated-files";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const Route = createFileRoute("/_sidebar/chat/$threadId")({
@@ -86,6 +87,40 @@ type ChatMessage = {
   usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
   model?: string;
 };
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const FILE_WRITE_TOOL_NAMES = new Set(["write_file", "edit_file"]);
+
+function extractWrittenFiles(message: ChatMessage): string[] {
+  const paths = new Set<string>();
+
+  for (const block of message.toolCallBlocks ?? []) {
+    if (FILE_WRITE_TOOL_NAMES.has(block.name) && block.state === "output-available") {
+      try {
+        const args = JSON.parse(block.arguments);
+        if (args.file_path) paths.add(args.file_path);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  for (const sub of message.subAgentBlocks ?? []) {
+    for (const tc of sub.toolCalls) {
+      if (FILE_WRITE_TOOL_NAMES.has(tc.name) && tc.state === "output-available") {
+        try {
+          const args = JSON.parse(tc.arguments);
+          if (args.file_path) paths.add(args.file_path);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  return Array.from(paths);
+}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -765,6 +800,12 @@ function ChatContent({
                     <MessageResponse>{msg.content}</MessageResponse>
                   )}
                 </MessageContent>
+                {msg.role === "assistant" && !streaming && (() => {
+                  const files = extractWrittenFiles(msg);
+                  return files.length > 0 ? (
+                    <GeneratedFiles files={files} volumePath={volumePath} />
+                  ) : null;
+                })()}
                 {msg.role === "assistant" && !streaming && msg.content && (
                   <div className="flex flex-col items-start gap-1">
                     <MessageActions>
