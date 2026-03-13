@@ -58,8 +58,8 @@ apx dev start
 Copy `.env.example` to `.env` and fill in your values:
 
 ```
-DATABRICKS_HOST=https://your-workspace.azuredatabricks.net
-DATABRICKS_TOKEN=your-personal-access-token
+DATABRICKS_CONFIG_PROFILE=<your-profile>
+MLFLOW_EXPERIMENT_ID=<your-experiment-id>
 ```
 
 In production (Databricks Apps), a service principal is used automatically.

@@ -58,8 +58,8 @@ apx dev start
 `.env.example` を `.env` にコピーして値を設定してください：
 
 ```
-DATABRICKS_HOST=https://your-workspace.azuredatabricks.net
-DATABRICKS_TOKEN=your-personal-access-token
+DATABRICKS_CONFIG_PROFILE=<your-profile>
+MLFLOW_EXPERIMENT_ID=<your-experiment-id>
 ```
 
 本番環境（Databricks Apps）ではサービスプリンシパルが自動的に使用されます。
