@@ -238,3 +238,5 @@ mlflow.db
 .superpowers/
 
 package-lock.json
+
+docs/superpowers/
