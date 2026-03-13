@@ -54,8 +54,6 @@ FAKE_MODEL_NAME = "_fake-model-for-testing"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 
-# MODELS_CONFIG = _load_models_config()
-# MODEL = next(k for k, v in MODELS_CONFIG.items() if v.get("default"))
 _SYSTEM_PROMPT_PATH = ASSETS_DIR / "system_prompt.md"
 _SUBAGENTS_CONFIG_PATH = ASSETS_DIR / "subagents.yaml"
 _TEXT_SUFFIXES = {".md", ".py", ".txt"}
@@ -391,7 +389,9 @@ def _build_subagents(
 ) -> list:
     """Load subagent definitions from YAML and inject dynamic tools."""
     subagents = _load_subagents(_SUBAGENTS_CONFIG_PATH)
+    result = []
     for sa in subagents:
+        sa = {**sa}  # shallow copy to avoid mutating the cached list's dicts
         if override_model and "model" in sa:
             sa["model"] = override_model
         elif "model" in sa:
@@ -404,7 +404,8 @@ def _build_subagents(
             ]
             sa["middleware"] = existing + [strip_content_block_ids]
 
-    return subagents
+        result.append(sa)
+    return result
 
 
 def init_model(model_name: str, ws: Optional[WorkspaceClient] = None):
@@ -420,7 +421,7 @@ def init_model(model_name: str, ws: Optional[WorkspaceClient] = None):
     )
     if not model.profile:
         model_config = load_models_config().get(model_name, {})
-        fallback_profile = model_config.get("profile", {
+        model.profile = model_config.get("profile", {
             "max_input_tokens": 200000,
             "max_output_tokens": 10000,
             "text_inputs": True,
@@ -429,7 +430,6 @@ def init_model(model_name: str, ws: Optional[WorkspaceClient] = None):
             "structured_output": True,
             "text_outputs": True,
         })
-        model.profile = fallback_profile
     return model
 
 
