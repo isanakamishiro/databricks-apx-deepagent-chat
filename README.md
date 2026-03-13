@@ -1,107 +1,109 @@
 # APX DeepAgent Chat
 
-Databricks上で動作するマルチエージェント型チャットアプリ。LLMを使ったWebリサーチと自動HTMLレポート生成を提供します。
+A multi-agent chat application running on Databricks. Provides LLM-powered web research and automatic HTML report generation.
 
-## 主な機能
+[日本語版はこちら](README.ja.md)
 
-- **マルチエージェント対応**: Web調査エージェントとレポート生成エージェントが連携
-- **複数LLMモデル**: 5種類のモデルを選択して利用可能
-- **自動レポート生成**: Web調査結果をポーランドされたHTMLレポートに変換
-- **Databricks UC Volume連携**: 調査結果・レポートをDatabricksのストレージに保存
-- **チャット履歴管理**: 過去の会話の保存・参照
-- **MLflow統合**: エージェントのトレース記録と実験管理
+## Features
 
-## アーキテクチャ
+- **Multi-agent orchestration**: Web research agent and report generation agent work in tandem
+- **Multiple LLM models**: Choose from 5 available models
+- **Automatic report generation**: Transforms web research results into polished HTML reports
+- **Databricks UC Volume integration**: Saves research results and reports to Databricks storage
+- **Chat history management**: Save and browse past conversations
+- **MLflow integration**: Agent trace recording and experiment management
 
-| レイヤー | 技術 |
-|----------|------|
+## Architecture
+
+| Layer | Technology |
+|-------|------------|
 | Backend | Python + FastAPI |
 | Frontend | React 19 + TypeScript + shadcn/ui |
-| AI基盤 | Databricks Model Serving + LangChain + deepagents |
-| ストレージ | Databricks UC Volume |
-| 可観測性 | MLflow（トレース・実験管理） |
+| AI | Databricks Model Serving + LangChain + deepagents |
+| Storage | Databricks UC Volume |
+| Observability | MLflow (tracing & experiment tracking) |
 
-## サブエージェント
+## Sub-agents
 
-| エージェント | 役割 |
-|--------------|------|
-| `web_researcher` | Web検索・調査を実行し、結果をMarkdown形式でUC Volumeに保存 |
-| `final_report_creator` | Markdownドラフトをポーランドされた最終HTMLレポートに変換 |
+| Agent | Role |
+|-------|------|
+| `web_researcher` | Performs web search and research, saves results as Markdown to UC Volume |
+| `final_report_creator` | Transforms Markdown drafts into polished final HTML reports |
 
-## 前提条件
+## Prerequisites
 
-- Databricks Workspace（Model Servingエンドポイントへのアクセス）
-- [apx CLI](https://github.com/databricks-solutions/apx) インストール済み
+- Databricks Workspace with access to Model Serving endpoints
+- [apx CLI](https://github.com/databricks-solutions/apx) installed
 - Python 3.11+
-- [uv](https://docs.astral.sh/uv/)（Pythonパッケージマネージャ）
-- [bun](https://bun.sh/)（フロントエンドパッケージマネージャ）
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
+- [bun](https://bun.sh/) (frontend package manager)
 
-## セットアップ
+## Setup
 
 ```bash
-# リポジトリのクローン
+# Clone the repository
 git clone https://github.com/your-org/apx-deepagent-chat.git
 cd apx-deepagent-chat
 
-# 依存関係のインストール
+# Install dependencies
 uv sync
 cd src/apx_deepagent_chat/ui && bun install && cd -
 
-# 開発サーバの起動
+# Start the development server
 apx dev start
 ```
 
-### 環境変数（ローカル開発時）
+### Environment Variables (local development)
 
-プロジェクトルートに `.env` ファイルを作成してください：
+Copy `.env.example` to `.env` and fill in your values:
 
 ```
 DATABRICKS_HOST=https://your-workspace.azuredatabricks.net
 DATABRICKS_TOKEN=your-personal-access-token
 ```
 
-本番環境（Databricks Apps）ではサービスプリンシパルが自動的に使用されます。
+In production (Databricks Apps), a service principal is used automatically.
 
-## 開発コマンド
+## Development Commands
 
 ```bash
-# 開発サーバの起動
+# Start all dev servers
 apx dev start
 
-# ログの確認
+# View logs
 apx dev logs
 
-# ログのリアルタイム表示
+# Stream logs in real time
 apx dev logs -f
 
-# 型チェック
+# Type check (TypeScript + Python)
 apx dev check
 
-# サーバの停止
+# Stop all servers
 apx dev stop
 ```
 
-## デプロイ
+## Deployment
 
 ```bash
-# 本番ビルド
+# Production build
 apx build
 
-# Databricksへのデプロイ
+# Deploy to Databricks
 databricks bundle deploy -p <your-profile>
 ```
 
-### デプロイ時の変数設定
+### Deployment Variables
 
-`databricks.yml` で以下の変数が必要です：
+The following variables are required in `databricks.yml`:
 
-| 変数 | 説明 |
-|------|------|
-| `experiment_id` | MLflow実験のID |
-| `volume_full_name` | データ保存用UC Volume名（例: `workspace.default.my-volume`） |
-| `mlflow_tracking_volume_full_name` | トレース保存用UC Volume名 |
+| Variable | Description |
+|----------|-------------|
+| `experiment_id` | MLflow experiment ID |
+| `volume_full_name` | UC Volume for data storage (e.g. `workspace.default.my-volume`) |
+| `mlflow_tracking_volume_full_name` | UC Volume for MLflow trace storage |
 
-環境変数での指定も可能です：
+You can also set them as environment variables:
 
 ```bash
 export BUNDLE_VAR_experiment_id=<your-experiment-id>
@@ -110,24 +112,24 @@ export BUNDLE_VAR_mlflow_tracking_volume_full_name=<your-mlflow-volume>
 databricks bundle deploy -p <your-profile>
 ```
 
-## プロジェクト構成
+## Project Structure
 
 ```
 apx-deepagent-chat/
 ├── src/apx_deepagent_chat/
-│   ├── backend/          # FastAPI バックエンド
-│   │   ├── app.py        # FastAPIエントリポイント
-│   │   ├── agent.py      # エージェント処理・SSEストリーミング
-│   │   ├── core.py       # 依存性注入・設定
-│   │   └── routers/      # APIルート
-│   ├── ui/               # React フロントエンド
-│   │   └── routes/       # ページコンポーネント
-│   └── assets/           # エージェント設定
-│       ├── models.yaml   # 利用可能なLLMモデル定義
-│       ├── subagents.yaml # サブエージェント定義
-│       └── system_prompt.md # システムプロンプト
-├── databricks.yml        # Databricksデプロイ設定
-└── pyproject.toml        # Pythonプロジェクト設定
+│   ├── backend/              # FastAPI backend
+│   │   ├── app.py            # FastAPI entrypoint
+│   │   ├── agent.py          # Agent logic & SSE streaming
+│   │   ├── core.py           # Dependency injection & config
+│   │   └── routers/          # API routes
+│   ├── ui/                   # React frontend
+│   │   └── routes/           # Page components
+│   └── assets/               # Agent configuration
+│       ├── models.yaml        # Available LLM model definitions
+│       ├── subagents.yaml     # Sub-agent definitions
+│       └── system_prompt.md   # System prompt
+├── databricks.yml            # Databricks deployment config
+└── pyproject.toml            # Python project config
 ```
 
 ---
