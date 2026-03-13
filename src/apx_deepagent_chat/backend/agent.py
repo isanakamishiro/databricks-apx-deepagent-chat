@@ -69,7 +69,6 @@ _tool_call_semaphore = asyncio.Semaphore(4)
 
 # --- スタートアップ時プリウォーム ---
 logger = logging.getLogger(__name__)
-_prewarm_logger = logging.getLogger(__name__)
 
 
 class _AgentPrewarm(LifespanDependency):
@@ -81,6 +80,7 @@ class _AgentPrewarm(LifespanDependency):
 
     @asynccontextmanager
     async def lifespan(self, app):
+        t0 = time.monotonic()
         try:
             await asyncio.gather(
                 _get_mcp_tools(get_sp_workspace_client()),
@@ -88,9 +88,9 @@ class _AgentPrewarm(LifespanDependency):
                 asyncio.to_thread(_load_system_prompt, _SYSTEM_PROMPT_PATH),
                 asyncio.to_thread(_load_preset_files),
             )
-            _prewarm_logger.info("[prewarm] completed")
+            logger.info("[prewarm] completed in %.3fs", time.monotonic() - t0)
         except Exception:
-            _prewarm_logger.warning("[prewarm] failed (non-fatal)", exc_info=True)
+            logger.warning("[prewarm] failed (non-fatal)", exc_info=True)
         yield
 
 @wrap_tool_call  # type: ignore[arg-type]
@@ -315,9 +315,12 @@ def get_current_time(timezone: str = "Asia/Tokyo") -> str:
     return now.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
-# @functools.cache
+@functools.cache
 def _load_subagents(config_path: Path) -> list:
-    """Load subagent definitions from YAML and wire up tools (cached)."""
+    """Load subagent definitions from YAML and wire up tools (cached).
+
+    Note: callers must shallow-copy returned dicts before mutating (e.g. ``sa = {**sa}``).
+    """
     available_tools = {
         "get_current_time": get_current_time,
         "web_search": web_search,
@@ -354,7 +357,7 @@ def _load_subagents(config_path: Path) -> list:
     return subagents
 
 
-# @functools.cache
+@functools.cache
 def _load_system_prompt(prompt_path: Path) -> str:
     """Load system prompt from file (cached)."""
     return prompt_path.read_text()
@@ -406,7 +409,9 @@ def _build_subagents(
         sa["middleware"] = [
             strip_content_block_ids,
             flatten_system_message,
-            # 過剰な検索呼び出しを抑制
+            # サブエージェントの過剰な検索呼び出しを抑制する
+            # thread_limit: 1スレッド（1サブエージェント実行）内での最大呼び出し回数
+            # run_limit: 会話全体での最大実行回数（サブエージェントのYAML定義のbudgetと合わせること）
             ToolCallLimitMiddleware(
                 tool_name="web_search",
                 thread_limit=3,
