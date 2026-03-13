@@ -1,6 +1,6 @@
 # APX DeepAgent Chat
 
-A multi-agent chat application running on Databricks. Provides LLM-powered web research and automatic HTML report generation.
+A multi-agent chat application running on Databricks, built with [apx](https://databricks-solutions.github.io/apx/). Provides LLM-powered web research and automatic HTML report generation.
 
 [日本語版はこちら](README.ja.md)
 

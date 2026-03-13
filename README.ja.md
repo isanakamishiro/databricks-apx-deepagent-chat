@@ -1,6 +1,6 @@
 # APX DeepAgent Chat
 
-Databricks上で動作するマルチエージェント型チャットアプリ。LLMを使ったWebリサーチと自動HTMLレポート生成を提供します。
+Databricks上で動作するマルチエージェント型チャットアプリ。[apx](https://databricks-solutions.github.io/apx/) を使って構築されています。LLMを使ったWebリサーチと自動HTMLレポート生成を提供します。
 
 [English README](README.md)
 
