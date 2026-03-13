@@ -334,6 +334,7 @@ function ChatPage() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let streamCompleted = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -538,6 +539,7 @@ function ChatPage() {
                   });
                 }
               } else if (resolvedType === "response.completed") {
+                streamCompleted = true;
                 const resp = data.response ?? {};
                 const usage = resp.usage;
                 const model = resp.model;
@@ -551,14 +553,14 @@ function ChatPage() {
                   }
                   return updated;
                 });
-              } else if (resolvedType === "error" && data.error) {
+              } else if (resolvedType === "error" && (data.error || data.message)) {
                 setMessages((prev) => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
                   if (last?.role === "assistant") {
                     updated[updated.length - 1] = {
                       ...last,
-                      content: `Error: ${data.error}`,
+                      content: `Error: ${data.error ?? data.message}`,
                       isError: true,
                     };
                   }
@@ -570,6 +572,21 @@ function ChatPage() {
             }
           }
         }
+      }
+
+      if (!streamCompleted) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === "assistant" && !last.isError) {
+            updated[updated.length - 1] = {
+              ...last,
+              content: last.content || "接続が切れました。もう一度お試しください。",
+              isError: true,
+            };
+          }
+          return updated;
+        });
       }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {

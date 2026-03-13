@@ -34,6 +34,7 @@ from mlflow.types.responses import (
     ResponsesAgentStreamEvent,
     to_chat_completions_input,
 )
+from mlflow.types.responses_helpers import ResponseError
 
 from .core._base import LifespanDependency
 from .uc_backend import UCVolumesBackend
@@ -325,22 +326,22 @@ def _load_subagents(config_path: Path) -> list:
     return subagents
 
 
-@functools.cache
+# @functools.cache
 def _load_system_prompt(prompt_path: Path) -> str:
     """Load system prompt from file (cached)."""
     return prompt_path.read_text()
 
 
-@functools.cache
+# @functools.cache
 def _load_preset_files() -> dict[str, Any]:
     """assets/ ディレクトリのファイルデータをキャッシュして返す。"""
 
     files: dict[str, Any] = {}
 
     # assets/AGENTS.md -> /AGENTS.md (CompositeBackend が /preset/ を除去して渡すキー)
-    agents_md_path = ASSETS_DIR / "AGENTS.md"
-    if agents_md_path.exists():
-        files["/AGENTS.md"] = create_file_data(agents_md_path.read_text())
+    # agents_md_path = ASSETS_DIR / "AGENTS.md"
+    # if agents_md_path.exists():
+    #     files["/AGENTS.md"] = create_file_data(agents_md_path.read_text())
 
     # assets/skills/** -> /skills/**
     skills_dir = ASSETS_DIR / "skills"
@@ -356,6 +357,7 @@ def _load_preset_files() -> dict[str, Any]:
 
 
 # --- スタートアップ時プリウォーム ---
+logger = logging.getLogger(__name__)
 _prewarm_logger = logging.getLogger(__name__)
 
 
@@ -384,13 +386,12 @@ class _AgentPrewarm(LifespanDependency):
 
 def _build_subagents(
     mcp_tools: list,
-    middleware: Optional[list] = None,
     ws_client: Optional[WorkspaceClient] = None,
     override_model=None,
 ) -> list:
     """Load subagent definitions from YAML and inject dynamic tools."""
     subagents = _load_subagents(_SUBAGENTS_CONFIG_PATH)
-    middleware = middleware or []
+
     result = []
     for sa in subagents:
         sa = {**sa}  # shallow copy to avoid mutating the cached list's dicts
@@ -401,10 +402,11 @@ def _build_subagents(
 
         if sa.get("_pending_mcp_tools"):
             sa["tools"] = mcp_tools + sa.get("tools", [])
-            existing = [
-                m for m in sa.get("middleware", []) if m is not strip_content_block_ids
-            ]
-            sa["middleware"] = existing + middleware
+
+        sa["middleware"] = [
+            strip_content_block_ids,
+            flatten_system_message,
+        ]
 
         result.append(sa)
     return result
@@ -468,7 +470,6 @@ async def init_agent(
 
     subagents = _build_subagents(
         mcp_tools=mcp_tools,
-        middleware=middleware,
         ws_client=ws_client,
         override_model=override_subagent_model,
     )
@@ -481,8 +482,8 @@ async def init_agent(
             get_current_time,
         ],
         system_prompt=_load_system_prompt(_SYSTEM_PROMPT_PATH),
-        memory=["/preset/AGENTS.md"],
-        skills=["/preset/skills/"],
+        memory=["AGENTS.md"],
+        skills=["/preset/skills/", "skills/"],
         model=model,
         backend=backend,
         subagents=subagents,
@@ -495,11 +496,15 @@ async def init_agent(
 async def non_streaming(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
     outputs = []
     completed_response: dict | None = None
+    error_msg: str | None = None
     async for event in streaming(request):
         if event.type == "response.output_item.done":
             outputs.append(event.item)  # type: ignore[attr-defined]
         elif event.type == "response.completed":
             completed_response = getattr(event, "response", None)
+        elif event.type == "error":
+            error_msg = getattr(event, "message", "Unknown error")
+            break
 
     kwargs: dict[str, Any] = {"output": outputs}
 
@@ -521,6 +526,9 @@ async def non_streaming(request: ResponsesAgentRequest) -> ResponsesAgentRespons
                 "output_tokens_details": {"reasoning_tokens": 0},
             }
 
+    if error_msg is not None:
+        kwargs["error"] = ResponseError(message=error_msg)
+
     return ResponsesAgentResponse(**kwargs)
 
 
@@ -528,57 +536,64 @@ async def non_streaming(request: ResponsesAgentRequest) -> ResponsesAgentRespons
 async def streaming(
     request: ResponsesAgentRequest,
 ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
-    user_workspace_client = get_user_workspace_client()
-    volume_path = _get_volume_path(request)
-    thread_id = _get_or_create_thread_id(request)
+    try:
+        user_workspace_client = get_user_workspace_client()
+        volume_path = _get_volume_path(request)
+        thread_id = _get_or_create_thread_id(request)
 
-    checkpointer = UCBundleCheckpointer(
-        volume_path=volume_path,
-        thread_id=thread_id,
-        workspace_client=get_sp_workspace_client(),
-    )
-
-    async with checkpointer:
-        model_name = _get_model_name(request) if not USE_FAKE_MODEL else FAKE_MODEL_NAME
-        model = init_model(
-            model_name=model_name,
-            ws=user_workspace_client,
-        )
-        override_model = None if not USE_FAKE_MODEL else model
-        agent = await init_agent(
-            model=model,
-            workspace_client=user_workspace_client,
-            checkpointer=checkpointer,
+        checkpointer = UCBundleCheckpointer(
             volume_path=volume_path,
-            override_subagent_model=override_model,
+            thread_id=thread_id,
+            workspace_client=get_sp_workspace_client(),
         )
 
-        all_messages = to_chat_completions_input(
-            [i.model_dump() for i in request.input]
-        )
-        # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
-        messages = {
-            "messages": [all_messages[-1]] if all_messages else [],
-            "files": _load_preset_files(),
-        }
-        config = {"configurable": {"thread_id": thread_id}}
+        async with checkpointer:
+            model_name = _get_model_name(request) if not USE_FAKE_MODEL else FAKE_MODEL_NAME
+            model = init_model(
+                model_name=model_name,
+                ws=user_workspace_client,
+            )
+            override_model = None if not USE_FAKE_MODEL else model
+            agent = await init_agent(
+                model=model,
+                workspace_client=user_workspace_client,
+                checkpointer=checkpointer,
+                volume_path=volume_path,
+                override_subagent_model=override_model,
+            )
 
-        max_ctx = 0
-        usage_accumulator: dict[str, int] = {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-        }
-        async for event in process_agent_astream_events(
-            agent.astream(
-                input=messages,
-                config=config,  # type: ignore[arg-type]
-                stream_mode=["updates", "messages"],
-                subgraphs=True,
-                version="v2",
-            ),
-            usage_accumulator=usage_accumulator,
-            model=model_name,
-            model_profile=model.profile if hasattr(model, "profile") else None,
-        ):
-            yield event
+            all_messages = to_chat_completions_input(
+                [i.model_dump() for i in request.input]
+            )
+            # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
+            messages = {
+                "messages": [all_messages[-1]] if all_messages else [],
+                "files": _load_preset_files(),
+            }
+            config = {"configurable": {"thread_id": thread_id}}
+
+            max_ctx = 0
+            usage_accumulator: dict[str, int] = {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+            }
+            async for event in process_agent_astream_events(
+                agent.astream(
+                    input=messages,
+                    config=config,  # type: ignore[arg-type]
+                    stream_mode=["updates", "messages"],
+                    subgraphs=True,
+                    version="v2",
+                ),
+                usage_accumulator=usage_accumulator,
+                model=model_name,
+                model_profile=model.profile if hasattr(model, "profile") else None,
+            ):
+                yield event
+    except Exception as e:
+        logger.exception("Streaming error: %s", e)
+        yield ResponsesAgentStreamEvent(
+            type="error",
+            message=str(e),  # type: ignore
+        )
