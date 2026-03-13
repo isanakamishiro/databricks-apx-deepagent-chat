@@ -1,7 +1,7 @@
 import SidebarLayout from "@/components/apx/sidebar-layout";
 import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
-import { Loader2, MessageSquare, PenSquare, Trash2 } from "lucide-react";
+import { ExternalLink, Loader2, MessageSquare, PenSquare, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -36,6 +36,15 @@ type ChatSummary = {
 const STORAGE_KEY_VOLUME = "apx_volume_path";
 const STORAGE_KEY_USER = "apx_user_id";
 
+function buildCatalogExplorerUrl(workspaceUrl: string, volumePath: string): string | null {
+  const parts = volumePath.split('/').filter(Boolean);
+  // parts = ["Volumes", "catalog", "schema", "volume"]
+  if (parts.length < 4 || parts[0] !== 'Volumes') return null;
+  const [, catalog, schema, volume] = parts;
+  const host = workspaceUrl.replace(/\/$/, '');
+  return `${host}/explore/data/volumes/${catalog}/${schema}/${volume}`;
+}
+
 function getOrCreateUserId(): string {
   let id = localStorage.getItem(STORAGE_KEY_USER);
   if (!id) {
@@ -50,9 +59,23 @@ function Layout() {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [workspaceUrl, setWorkspaceUrl] = useState("");
 
   const userId = getOrCreateUserId();
   const volumePath = localStorage.getItem(STORAGE_KEY_VOLUME) ?? "";
+
+  useEffect(() => {
+    fetch('/api/config')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.workspace_url) setWorkspaceUrl(data.workspace_url);
+      })
+      .catch(() => {});
+  }, []);
+
+  const catalogExplorerUrl = workspaceUrl && volumePath
+    ? buildCatalogExplorerUrl(workspaceUrl, volumePath)
+    : null;
 
   // 現在のルートパスからthreadIdを取得
   const routerState = useRouterState();
@@ -139,6 +162,17 @@ function Layout() {
           <div className="flex items-center gap-1">
             {isLoading && chats.length > 0 && (
               <Loader2 size={12} className="animate-spin text-muted-foreground" />
+            )}
+            {catalogExplorerUrl && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5"
+                title="カタログエクスプローラで開く"
+                onClick={() => window.open(catalogExplorerUrl, '_blank')}
+              >
+                <ExternalLink size={13} />
+              </Button>
             )}
             <Button
               variant="ghost"
