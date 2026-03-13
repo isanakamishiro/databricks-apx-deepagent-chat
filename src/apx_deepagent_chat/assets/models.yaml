@@ -1,7 +1,6 @@
 models:
   databricks-qwen3-next-80b-a3b-instruct:
     display_name: "Qwen3-Next 80B"
-    default: true
     profile:
       max_input_tokens: 200000
       max_output_tokens: 10000
@@ -13,6 +12,7 @@ models:
 
   databricks-gpt-oss-120b:
     display_name: "GPT-OSS 120B"
+    default: true
     profile:
       max_input_tokens: 200000
       max_output_tokens: 25000

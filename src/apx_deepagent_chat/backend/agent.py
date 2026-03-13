@@ -23,7 +23,7 @@ from deepagents.backends.utils import create_file_data
 from deepagents.middleware.summarization import (
     create_summarization_tool_middleware,
 )
-from langchain.agents.middleware import wrap_model_call, wrap_tool_call
+from langchain.agents.middleware import wrap_model_call, wrap_tool_call, ToolCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import tool as langchain_tool
@@ -66,25 +66,32 @@ _mcp_tools_cached_at: float = 0.0
 _mcp_tools_lock = asyncio.Lock()
 _tool_call_semaphore = asyncio.Semaphore(4)
 
-@functools.cache
-def load_models_config() -> dict:
-    config_path = ASSETS_DIR / "models.yaml"
-    with open(config_path) as f:
-        return yaml.safe_load(f)["models"]
 
-@functools.cache
-def _make_fake_model():
-    """FakeListChatModel を構築して返す（開発モード用）."""
-    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+# --- スタートアップ時プリウォーム ---
+logger = logging.getLogger(__name__)
+_prewarm_logger = logging.getLogger(__name__)
 
-    FAKE_RESPONSE = "こんにちは！私は元気です！"
 
-    class ToolCapableFakeModel(FakeListChatModel):
-        def bind_tools(self, tools, **kwargs):
-            return self
+class _AgentPrewarm(LifespanDependency):
+    """アプリ起動時にキャッシュを並列プリウォームし、初回リクエストのコールドスタートを排除する。"""
 
-    return ToolCapableFakeModel(responses=[FAKE_RESPONSE] * 20)
+    @staticmethod
+    def __call__():
+        return None
 
+    @asynccontextmanager
+    async def lifespan(self, app):
+        try:
+            await asyncio.gather(
+                _get_mcp_tools(get_sp_workspace_client()),
+                asyncio.to_thread(_load_subagents, _SUBAGENTS_CONFIG_PATH),
+                asyncio.to_thread(_load_system_prompt, _SYSTEM_PROMPT_PATH),
+                asyncio.to_thread(_load_preset_files),
+            )
+            _prewarm_logger.info("[prewarm] completed")
+        except Exception:
+            _prewarm_logger.warning("[prewarm] failed (non-fatal)", exc_info=True)
+        yield
 
 @wrap_tool_call  # type: ignore[arg-type]
 async def strip_content_block_ids(request, handler):
@@ -127,6 +134,26 @@ async def flatten_system_message(request, handler):
         request.system_message = SystemMessage(content="\n\n".join(parts))
     return await handler(request)
 
+
+
+@functools.cache
+def load_models_config() -> dict:
+    config_path = ASSETS_DIR / "models.yaml"
+    with open(config_path) as f:
+        return yaml.safe_load(f)["models"]
+
+@functools.cache
+def _make_fake_model():
+    """FakeListChatModel を構築して返す（開発モード用）."""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    FAKE_RESPONSE = "こんにちは！私は元気です！"
+
+    class ToolCapableFakeModel(FakeListChatModel):
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+    return ToolCapableFakeModel(responses=[FAKE_RESPONSE] * 20)
 
 def _init_mcp_client(
     workspace_client: WorkspaceClient,
@@ -208,18 +235,19 @@ def _get_or_create_thread_id(request: ResponsesAgentRequest) -> str:
 
 
 @langchain_tool
-def web_search(query: str, max_results: int = 5, region: str = "jp-jp") -> str:
+def web_search(query: str, max_results: int = 5, region: str = "jp-jp", timelimit: Optional[str] = None) -> str:
     """DuckDuckGoでWeb検索を行い、結果を返します。最新情報や不明な事実を調べる場合に使用してください。
 
     Args:
         query: 検索クエリ。
         max_results: 返す検索結果の最大件数。デフォルトは5。
         region: 検索対象の地域コード。デフォルトは"jp-jp"(日本)。例: "us-en", "uk-en", "de-de"。
+        timelimit: 検索結果の期間フィルタ。"d"(1日以内), "w"(1週間以内), "m"(1ヶ月以内), "y"(1年以内)。デフォルトはNone(制限なし)。
     """
     from ddgs import DDGS
 
     try:
-        results = list(DDGS().text(query, region=region, max_results=max_results))
+        results = list(DDGS().text(query, region=region, max_results=max_results, timelimit=timelimit))
     except TimeoutError:
         return (
             "検索エラー: リクエストがタイムアウトしました。後でもう一度試してください。"
@@ -287,7 +315,7 @@ def get_current_time(timezone: str = "Asia/Tokyo") -> str:
     return now.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
-@functools.cache
+# @functools.cache
 def _load_subagents(config_path: Path) -> list:
     """Load subagent definitions from YAML and wire up tools (cached)."""
     available_tools = {
@@ -332,7 +360,7 @@ def _load_system_prompt(prompt_path: Path) -> str:
     return prompt_path.read_text()
 
 
-# @functools.cache
+@functools.cache
 def _load_preset_files() -> dict[str, Any]:
     """assets/ ディレクトリのファイルデータをキャッシュして返す。"""
 
@@ -354,34 +382,6 @@ def _load_preset_files() -> dict[str, Any]:
                 )
 
     return files
-
-
-# --- スタートアップ時プリウォーム ---
-logger = logging.getLogger(__name__)
-_prewarm_logger = logging.getLogger(__name__)
-
-
-class _AgentPrewarm(LifespanDependency):
-    """アプリ起動時にキャッシュを並列プリウォームし、初回リクエストのコールドスタートを排除する。"""
-
-    @staticmethod
-    def __call__():
-        return None
-
-    @asynccontextmanager
-    async def lifespan(self, app):
-        t0 = time.monotonic()
-        try:
-            await asyncio.gather(
-                _get_mcp_tools(get_sp_workspace_client()),
-                asyncio.to_thread(_load_subagents, _SUBAGENTS_CONFIG_PATH),
-                asyncio.to_thread(_load_system_prompt, _SYSTEM_PROMPT_PATH),
-                asyncio.to_thread(_load_preset_files),
-            )
-            _prewarm_logger.info("[prewarm] completed in %.3fs", time.monotonic() - t0)
-        except Exception:
-            _prewarm_logger.warning("[prewarm] failed (non-fatal)", exc_info=True)
-        yield
 
 
 def _build_subagents(
@@ -406,6 +406,17 @@ def _build_subagents(
         sa["middleware"] = [
             strip_content_block_ids,
             flatten_system_message,
+            # 過剰な検索呼び出しを抑制
+            ToolCallLimitMiddleware(
+                tool_name="web_search",
+                thread_limit=3,
+                run_limit=2,
+            ),
+            ToolCallLimitMiddleware(
+                tool_name="web_fetch",
+                thread_limit=3,
+                run_limit=3,
+            ),
         ]
 
         result.append(sa)

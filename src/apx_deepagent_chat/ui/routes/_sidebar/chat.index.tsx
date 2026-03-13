@@ -33,7 +33,7 @@ const STORAGE_KEY_MODEL = "apx_selected_model";
 const STARTER_SUGGESTIONS = [
   "Databricksについて調査して",
   "LLMの仕組みを説明して",
-  "大阪の今週の天気予報をHTML形式で保存して",
+  "大阪の今週の天気予報を報告して",
 ];
 
 function ChatIndexPage() {

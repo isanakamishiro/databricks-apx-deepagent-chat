@@ -88,61 +88,61 @@ CLI equivalents (use MCP tools above when available):
 
 For backend patterns (DI, CRUD routers, AppConfig, lifespan) and frontend patterns (Suspense, mutations, selector, components), see `.claude/skills/apx/`.
 
-## ワークフロー設計
+## Workflow Design
 
-### 1. Planモードを基本とする
-- 3ステップ以上 or アーキテクチャに関わるタスクは必ずPlanモードで開始する
-- 途中でうまくいかなくなったら、無理に進めずすぐに立ち止まって再計画する
-- 構築だけでなく、検証ステップにもPlanモードを使う
-- 曖昧さを減らすため、実装前に詳細な仕様を書く
+### 1. Plan Mode as Default
+- Always start with Plan Mode for tasks with 3+ steps or architectural impact.
+- If things go wrong mid-way, stop immediately and re-plan rather than pushing through.
+- Use Plan Mode not just for building, but also for verification steps.
+- Write detailed specs before implementation to reduce ambiguity.
 
-### 2. サブエージェント戦略
-- メインのコンテキストウィンドウをクリーンに保つためにサブエージェントを積極的に活用する
-- リサーチ・調査・並列分析はサブエージェントに任せる
-- 複雑な問題には、サブエージェントを使ってより多くの計算リソースを投入する
-- 集中して実行するために、サブエージェント1つにつき1タスクを割り当てる
+### 2. Subagent Strategy
+- Actively use subagents to keep the main context window clean.
+- Delegate research, investigation, and parallel analysis to subagents.
+- For complex problems, throw more compute at them via subagents.
+- Assign one task per subagent for focused execution.
 
-### 3. 自己改善ループ
-- ユーザーから修正を受けたら必ず `tasks/lessons.md` にそのパターンを記録する
-- 同じミスを繰り返さないように、自分へのルールを書く
-- ミス率が下がるまで、ルールを徹底的に改善し続ける
-- セッション開始時に、そのプロジェクトに関連するlessonsをレビューする
+### 3. Self-Improvement Loop
+- After receiving corrections from the user, always record the pattern in `tasks/lessons.md`.
+- Write rules for yourself to avoid repeating the same mistakes.
+- Continuously refine the rules until the error rate drops.
+- At the start of each session, review lessons relevant to the project.
 
-### 4. 完了前に必ず検証する
-- 動作を証明できるまで、タスクを完了とマークしない
-- 必要に応じてmainブランチと自分の変更の差分を確認する
-- 「スタッフエンジニアはこれを承認するか？」と自問する
-- テストを実行し、ログを確認し、正しく動作することを示す
+### 4. Always Verify Before Marking Complete
+- Do not mark a task complete until you can prove it works.
+- Check the diff against the main branch when needed.
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, and demonstrate correct behavior.
 
-### 5. エレガントさを追求する（バランスよく）
-- 重要な変更をする前に「もっとエレガントな方法はないか？」と一度立ち止まる
-- ハック的な修正に感じたら「今知っていることをすべて踏まえて、エレガントな解決策を実装する」
-- シンプルで明白な修正にはこのプロセスをスキップする（過剰設計しない）
-- 提示する前に自分の作業に自問自答する
+### 5. Pursue Elegance (with Balance)
+- Before making significant changes, pause and ask: "Is there a more elegant way?"
+- If a fix feels hacky, implement an elegant solution using everything you know.
+- Skip this process for simple, obvious fixes (avoid over-engineering).
+- Self-critique your work before presenting it.
 
-### 6. 自律的なバグ修正
-- バグレポートを受けたら、手取り足取り教えてもらわずにそのまま修正する
-- ログ・エラー・失敗しているテストを見て、自分で解決する
-- ユーザーのコンテキスト切り替えをゼロにする
-- 言われなくても、失敗しているCIテストを修正しに行く
-
----
-
-## タスク管理
-
-1. **まず計画を立てる**：チェック可能な項目として `tasks/todo.md` に計画を書く
-2. **計画を確認する**：実装を開始する前に確認する
-3. **進捗を記録する**：完了した項目を随時マークしていく
-4. **変更を説明する**：各ステップで高レベルのサマリーを提供する
-5. **結果をドキュメント化する**：`tasks/todo.md` にレビューセクションを追加する
-6. **学びを記録する**：修正を受けた後に `tasks/lessons.md` を更新する
+### 6. Autonomous Bug Fixing
+- When given a bug report, fix it autonomously without needing hand-holding.
+- Look at logs, errors, and failing tests to solve problems yourself.
+- Minimize context switching for the user.
+- Proactively fix failing CI tests without being asked.
 
 ---
 
-## コア原則
+## Task Management
 
-- **シンプル第一**：すべての変更をできる限りシンプルにする。影響するコードを最小限にする。
-- **手を抜かない**：根本原因を見つける。一時的な修正は避ける。シニアエンジニアの水準を保つ。
-- **影響を最小化する**：変更は必要な箇所のみにとどめる。バグを新たに引き込まない。
-- ブラウザを利用するときはplaywright-cliを利用する。テストで取得したスナップショットは/screenshotsに保存するようにしてください。
-- 通常のplaywrightは利用しないでください。必ずplaywright-cliを使ってください。
+1. **Plan first**: Write the plan in `tasks/todo.md` as checkable items.
+2. **Review the plan**: Confirm before starting implementation.
+3. **Track progress**: Mark completed items as you go.
+4. **Explain changes**: Provide a high-level summary at each step.
+5. **Document results**: Add a review section to `tasks/todo.md`.
+6. **Record learnings**: Update `tasks/lessons.md` after receiving corrections.
+
+---
+
+## Core Principles
+
+- **Simplicity first**: Make every change as simple as possible. Minimize the code affected.
+- **No shortcuts**: Find the root cause. Avoid temporary fixes. Maintain senior engineer standards.
+- **Minimize impact**: Limit changes to only what is necessary. Don't introduce new bugs.
+- When using a browser, use playwright-cli. Save snapshots taken during testing to /screenshots.
+- Do not use regular playwright. Always use playwright-cli.
