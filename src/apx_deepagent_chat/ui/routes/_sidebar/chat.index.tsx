@@ -33,7 +33,7 @@ const STORAGE_KEY_MODEL = "apx_selected_model";
 const STARTER_SUGGESTIONS = [
   "Databricksについて調査して",
   "LLMの仕組みを説明して",
-  "大阪の今週の天気をHTML形式でレポートして",
+  "大阪の今週の天気予報をHTML形式で保存して",
 ];
 
 function ChatIndexPage() {
@@ -106,7 +106,7 @@ function ChatIndexContent() {
         <Alert variant="warning" className="w-full max-w-2xl">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            Volume Path が未設定です。チャット履歴が保存されません。ツールバーの
+            Volume Path が未設定です。ツールバーの
             <span className="font-medium">「Volume」</span>
             ボタンから設定してください。
           </AlertDescription>
