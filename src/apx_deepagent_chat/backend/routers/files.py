@@ -1,5 +1,6 @@
 import io
 from pathlib import PurePosixPath
+from urllib.parse import quote
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import NotFound, ResourceDoesNotExist
@@ -97,10 +98,13 @@ async def files_download(request: Request, ws: Dependencies.UserClient, path: st
                 break
             yield chunk
 
+    encoded_filename = quote(filename, encoding="utf-8")
+    content_disposition = f"attachment; filename*=utf-8''{encoded_filename}"
+
     return StreamingResponse(
         iterfile(),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition},
     )
 
 
