@@ -7,7 +7,7 @@ web_researcher:
     Give it a focused research goal — not an open-ended investigation.
     Examples: 'Search for global EV sales trends and key statistics for 2024-2025',
     'Find the latest pricing and features of competitor X's products'.
-  model: databricks-qwen3-next-80b-a3b-instruct
+  # model: databricks-qwen3-next-80b-a3b-instruct
   system_prompt: |
     You are a web research assistant. You receive a focused research goal, save findings to a file, and return the file path.
 

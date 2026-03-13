@@ -384,11 +384,13 @@ class _AgentPrewarm(LifespanDependency):
 
 def _build_subagents(
     mcp_tools: list,
+    middleware: Optional[list] = None,
     ws_client: Optional[WorkspaceClient] = None,
     override_model=None,
 ) -> list:
     """Load subagent definitions from YAML and inject dynamic tools."""
     subagents = _load_subagents(_SUBAGENTS_CONFIG_PATH)
+    middleware = middleware or []
     result = []
     for sa in subagents:
         sa = {**sa}  # shallow copy to avoid mutating the cached list's dicts
@@ -402,7 +404,7 @@ def _build_subagents(
             existing = [
                 m for m in sa.get("middleware", []) if m is not strip_content_block_ids
             ]
-            sa["middleware"] = existing + [strip_content_block_ids]
+            sa["middleware"] = existing + middleware
 
         result.append(sa)
     return result
@@ -449,12 +451,6 @@ async def init_agent(
     # MCP ツールは常にサービスプリンシパルで取得（ユーザー認証不要なワークスペース全体のツール）
     mcp_tools = await _get_mcp_tools(get_sp_workspace_client())
 
-    subagents = _build_subagents(
-        mcp_tools=mcp_tools,
-        ws_client=ws_client,
-        override_model=override_subagent_model,
-    )
-
     backend = lambda rt: CompositeBackend(
         default=UCVolumesBackend(
             volume_path=volume_path,
@@ -463,6 +459,18 @@ async def init_agent(
         routes={
             "/preset/": StateBackend(rt),
         },
+    )
+    middleware=[
+        strip_content_block_ids,
+        flatten_system_message,
+        create_summarization_tool_middleware(model, backend),
+    ]
+
+    subagents = _build_subagents(
+        mcp_tools=mcp_tools,
+        middleware=middleware,
+        ws_client=ws_client,
+        override_model=override_subagent_model,
     )
 
     return create_deep_agent(
@@ -479,11 +487,7 @@ async def init_agent(
         backend=backend,
         subagents=subagents,
         checkpointer=checkpointer,
-        middleware=[
-            strip_content_block_ids,
-            flatten_system_message,
-            create_summarization_tool_middleware(model, backend),
-        ],
+        middleware=middleware,
     )
 
 
