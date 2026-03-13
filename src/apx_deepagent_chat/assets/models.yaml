@@ -1,0 +1,56 @@
+models:
+  databricks-qwen3-next-80b-a3b-instruct:
+    display_name: "Qwen3-Next 80B"
+    default: true
+    profile:
+      max_input_tokens: 200000
+      max_output_tokens: 10000
+      text_inputs: true
+      tool_choice: true
+      tool_calling: true
+      structured_output: true
+      text_outputs: true
+
+  databricks-gpt-oss-120b:
+    display_name: "GPT-OSS 120B"
+    profile:
+      max_input_tokens: 200000
+      max_output_tokens: 25000
+      text_inputs: true
+      tool_choice: true
+      tool_calling: true
+      structured_output: true
+      text_outputs: true
+
+  databricks-gpt-oss-20b:
+    display_name: "GPT-OSS 20B"
+    profile:
+      max_input_tokens: 200000
+      max_output_tokens: 25000
+      text_inputs: true
+      tool_choice: true
+      tool_calling: true
+      structured_output: true
+      text_outputs: true
+
+  databricks-gemma-3-12b:
+    display_name: "Gemma3 12B"
+    profile:
+      max_input_tokens: 128000
+      max_output_tokens: 8192
+      text_inputs: true
+      tool_choice: true
+      tool_calling: true
+      structured_output: true
+      text_outputs: true
+
+  databricks-llama-4-maverick:
+    display_name: "Llama4 Maverick"
+    profile:
+      max_input_tokens: 200000
+      max_output_tokens: 8192
+      text_inputs: true
+      tool_choice: true
+      tool_calling: true
+      structured_output: true
+      text_outputs: true

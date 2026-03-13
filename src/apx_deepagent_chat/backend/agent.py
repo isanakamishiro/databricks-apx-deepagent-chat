@@ -49,16 +49,31 @@ mlflow.langchain.autolog()
 # Enable async logging
 mlflow.config.enable_async_logging()
 
-MODEL = "databricks-qwen3-next-80b-a3b-instruct"
-# MODEL = "databricks-gpt-oss-120b"
 USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
 FAKE_MODEL_NAME = "_fake-model-for-testing"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
+
+
+# MODELS_CONFIG = _load_models_config()
+# MODEL = next(k for k, v in MODELS_CONFIG.items() if v.get("default"))
 _SYSTEM_PROMPT_PATH = ASSETS_DIR / "system_prompt.md"
 _SUBAGENTS_CONFIG_PATH = ASSETS_DIR / "subagents.yaml"
 _TEXT_SUFFIXES = {".md", ".py", ".txt"}
 
+# --- Module-level caches ---
+_MCP_TOOLS_TTL_SECONDS = 30 * 60  # 30 minutes
+_mcp_tools_cache: list | None = None
+_mcp_tools_cached_at: float = 0.0
+_mcp_tools_lock = asyncio.Lock()
+_tool_call_semaphore = asyncio.Semaphore(4)
 
+@functools.cache
+def load_models_config() -> dict:
+    config_path = ASSETS_DIR / "models.yaml"
+    with open(config_path) as f:
+        return yaml.safe_load(f)["models"]
+
+@functools.cache
 def _make_fake_model():
     """FakeListChatModel を構築して返す（開発モード用）."""
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
@@ -70,14 +85,6 @@ def _make_fake_model():
             return self
 
     return ToolCapableFakeModel(responses=[FAKE_RESPONSE] * 20)
-
-
-# --- Module-level caches ---
-_MCP_TOOLS_TTL_SECONDS = 30 * 60  # 30 minutes
-_mcp_tools_cache: list | None = None
-_mcp_tools_cached_at: float = 0.0
-_mcp_tools_lock = asyncio.Lock()
-_tool_call_semaphore = asyncio.Semaphore(4)
 
 
 @wrap_tool_call  # type: ignore[arg-type]
@@ -158,6 +165,14 @@ async def _get_mcp_tools(workspace_client: WorkspaceClient) -> list:
         _mcp_tools_cache = tools
         _mcp_tools_cached_at = time.monotonic()
         return tools
+
+
+def _get_model_name(request: ResponsesAgentRequest) -> str:
+    """Extract llm_model from custom_inputs, falling back to the default model."""
+    ci = dict(request.custom_inputs or {})
+    if "llm_model" in ci and ci["llm_model"]:
+        return str(ci["llm_model"])
+    return next(k for k, v in load_models_config().items() if v.get("default"))
 
 
 def _get_volume_path(request: ResponsesAgentRequest) -> str:
@@ -295,7 +310,7 @@ def _load_subagents(config_path: Path) -> list:
             "system_prompt": spec["system_prompt"],
         }
         if "model" in spec:
-            subagent["model"] = ChatDatabricks(model=spec["model"])
+            subagent["model"] = spec["model"]
         if "skills" in spec:
             subagent["skills"] = spec["skills"]
         if "tools" in spec:
@@ -371,6 +386,7 @@ class _AgentPrewarm(LifespanDependency):
 
 def _build_subagents(
     mcp_tools: list,
+    ws_client: Optional[WorkspaceClient] = None,
     override_model=None,
 ) -> list:
     """Load subagent definitions from YAML and inject dynamic tools."""
@@ -378,6 +394,9 @@ def _build_subagents(
     for sa in subagents:
         if override_model and "model" in sa:
             sa["model"] = override_model
+        elif "model" in sa:
+            sa["model"] = init_model(model_name=sa["model"], ws=ws_client)
+
         if sa.get("_pending_mcp_tools"):
             sa["tools"] = mcp_tools + sa.get("tools", [])
             existing = [
@@ -388,19 +407,20 @@ def _build_subagents(
     return subagents
 
 
-def init_model(model_name: str = MODEL, ws: Optional[WorkspaceClient] = None):
+def init_model(model_name: str, ws: Optional[WorkspaceClient] = None):
     if model_name == FAKE_MODEL_NAME:
         return _make_fake_model()
 
     ws_client = ws or get_sp_workspace_client()
     model = ChatDatabricks(
-        model=MODEL,
+        model=model_name,
         workspace_client=ws_client,
         temperature=0,
         use_responses_api=False,
     )
     if not model.profile:
-        model.profile = {
+        model_config = load_models_config().get(model_name, {})
+        fallback_profile = model_config.get("profile", {
             "max_input_tokens": 200000,
             "max_output_tokens": 10000,
             "text_inputs": True,
@@ -408,7 +428,8 @@ def init_model(model_name: str = MODEL, ws: Optional[WorkspaceClient] = None):
             "tool_calling": True,
             "structured_output": True,
             "text_outputs": True,
-        }
+        })
+        model.profile = fallback_profile
     return model
 
 
@@ -430,6 +451,7 @@ async def init_agent(
 
     subagents = _build_subagents(
         mcp_tools=mcp_tools,
+        ws_client=ws_client,
         override_model=override_subagent_model,
     )
 
@@ -513,8 +535,9 @@ async def streaming(
     )
 
     async with checkpointer:
+        model_name = _get_model_name(request) if not USE_FAKE_MODEL else FAKE_MODEL_NAME
         model = init_model(
-            model_name=MODEL if not USE_FAKE_MODEL else FAKE_MODEL_NAME,
+            model_name=model_name,
             ws=user_workspace_client,
         )
         override_model = None if not USE_FAKE_MODEL else model
@@ -551,7 +574,7 @@ async def streaming(
                 version="v2",
             ),
             usage_accumulator=usage_accumulator,
-            model=MODEL,
+            model=model_name,
             model_profile=model.profile if hasattr(model, "profile") else None,
         ):
             yield event

@@ -27,7 +27,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 from langchain_core.messages import HumanMessage
 
-from apx_deepagent_chat.backend.agent import init_agent, init_model, MODEL
+from apx_deepagent_chat.backend.agent import init_agent, init_model, load_models_config
 from apx_deepagent_chat.backend.agent_utils import process_agent_astream_events, get_user_workspace_client
 
 import logging
@@ -91,7 +91,8 @@ async def run_test_case(
     print("-" * 50)
 
     user_workspace_client = get_user_workspace_client()
-    model = init_model(MODEL, user_workspace_client)
+    default_model = next(k for k, v in load_models_config().items() if v.get("default"))
+    model = init_model(default_model, user_workspace_client)
     if override_model:
         print(f"*** モデルを {override_model.__class__.__name__} にオーバーライドして実行 ***")
         model = override_model

@@ -173,7 +173,7 @@ function ChatPage() {
   const [selectedModel, setSelectedModel] = useState(
     () => localStorage.getItem(STORAGE_KEY_MODEL) ?? ""
   );
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [availableModels, setAvailableModels] = useState<{id: string; display_name: string}[]>([]);
 
   const userId = getOrCreateUserId();
 
@@ -652,7 +652,7 @@ type ChatContentProps = {
   isLoadingHistory: boolean;
   volumePath: string;
   selectedModel: string;
-  availableModels: string[];
+  availableModels: {id: string; display_name: string}[];
   onSubmit: (text: string) => void;
   onStop: () => void;
   onRetry: () => void;
@@ -700,8 +700,8 @@ function ChatContent({
               </PromptInputSelectTrigger>
               <PromptInputSelectContent>
                 {availableModels.map((m) => (
-                  <PromptInputSelectItem key={m} value={m}>
-                    {m}
+                  <PromptInputSelectItem key={m.id} value={m.id}>
+                    {m.display_name}
                   </PromptInputSelectItem>
                 ))}
               </PromptInputSelectContent>

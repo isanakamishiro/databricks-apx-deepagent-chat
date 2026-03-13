@@ -53,7 +53,7 @@ function ChatIndexContent() {
   const [selectedModel, setSelectedModel] = useState(
     () => localStorage.getItem(STORAGE_KEY_MODEL) ?? ""
   );
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [availableModels, setAvailableModels] = useState<{id: string; display_name: string}[]>([]);
 
   useEffect(() => {
     fetch("/api/config")
@@ -142,8 +142,8 @@ function ChatIndexContent() {
                   </PromptInputSelectTrigger>
                   <PromptInputSelectContent>
                     {availableModels.map((m) => (
-                      <PromptInputSelectItem key={m} value={m}>
-                        {m}
+                      <PromptInputSelectItem key={m.id} value={m.id}>
+                        {m.display_name}
                       </PromptInputSelectItem>
                     ))}
                   </PromptInputSelectContent>
