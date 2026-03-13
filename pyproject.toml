@@ -1,7 +1,7 @@
 [project]
 name = "apx-deepagent-chat"
 dynamic = ["version"]
-description = "Add your description here"
+description = "Databricks上で動作するマルチエージェント型チャットアプリ。Web調査とHTMLレポート生成をサポート。"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
