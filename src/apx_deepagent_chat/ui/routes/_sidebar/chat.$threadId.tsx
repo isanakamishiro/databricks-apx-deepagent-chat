@@ -813,21 +813,28 @@ function ChatContent({
                 })()}
                 {msg.role === "assistant" && !streaming && msg.content && (
                   <div className="flex flex-col items-start gap-1">
-                    <MessageActions>
-                      <MessageAction
-                        tooltip="コピー"
-                        onClick={() =>
-                          navigator.clipboard.writeText(msg.content)
-                        }
-                      >
-                        <Copy className="size-3.5" />
-                      </MessageAction>
-                      {isLast && (
-                        <MessageAction tooltip="再生成" onClick={onRetry}>
-                          <RefreshCw className="size-3.5" />
+                    <div className="flex items-center gap-2">
+                      <MessageActions>
+                        <MessageAction
+                          tooltip="コピー"
+                          onClick={() =>
+                            navigator.clipboard.writeText(msg.content)
+                          }
+                        >
+                          <Copy className="size-3.5" />
                         </MessageAction>
+                        {isLast && (
+                          <MessageAction tooltip="再生成" onClick={onRetry}>
+                            <RefreshCw className="size-3.5" />
+                          </MessageAction>
+                        )}
+                      </MessageActions>
+                      {msg.model && (
+                        <span className="text-xs text-muted-foreground">
+                          {availableModels.find((m) => m.id === msg.model)?.display_name ?? msg.model}
+                        </span>
                       )}
-                    </MessageActions>
+                    </div>
                     {isLast && msg.usage && (
                       <Context
                         usedTokens={msg.usage.total_tokens}
