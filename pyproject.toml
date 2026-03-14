@@ -12,7 +12,7 @@ dependencies = [
     "databricks-langchain>=0.17.0",
     "databricks-agents>=1.9.3",
     "mlflow>=3.10.1",
-    "deepagents>=0.4.9",
+    "deepagents>=0.4.11",
     "langchain-mcp-adapters>=0.2.1",
     "python-dotenv>=1.2.1",
     "markitdown[all]>=0.1.4",
@@ -25,6 +25,12 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ty>=0.0.12",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "pytest-mock>=3.14.0",
+    "httpx>=0.28.0",
+    "anyio>=4.7.0",
 ]
 
 [tool.apx.metadata]
@@ -62,3 +68,22 @@ version = "{version}"
 [tool.hatch.build]
 artifacts = ["src/apx_deepagent_chat/__dist__", "src/apx_deepagent_chat/_metadata.py"]
 exclude = ["src/apx_deepagent_chat/ui"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--cov=src/apx_deepagent_chat/backend",
+    "--cov-report=term-missing",
+    "-v",
+]
+markers = [
+    "integration: requires real Databricks (skip with '-m not integration')",
+]
+
+[tool.coverage.run]
+omit = [
+    "*/agent.py",
+    "*/uc_checkpointer.py",
+    "*/core/*",
+]

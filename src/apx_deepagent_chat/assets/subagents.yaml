@@ -93,7 +93,7 @@ final_report_creator:
     Use when you have a draft report and need a presentation-ready HTML document.
     Optionally accepts a `nuance` parameter to control the tone and atmosphere of the report
     (e.g. "明るくポジティブな雰囲気", "フォーマルで落ち着いたトーン", "カジュアルで読みやすいスタイル").
-  model: databricks-qwen3-next-80b-a3b-instruct
+  model: databricks-gpt-oss-120b
   system_prompt: |
     You are a professional report designer. Your ONLY job is:
     1. Read the draft report from the given file path
