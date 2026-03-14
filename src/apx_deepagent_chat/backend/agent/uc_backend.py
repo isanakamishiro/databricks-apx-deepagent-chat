@@ -1,7 +1,7 @@
-"""Databricks Unity Catalog Volumes を使った DeepAgents バックエンド.
+"""Databricks Unity Catalog Volumes を使った DeepAgents バックエンド。
 
-Databricks SDK の Files API 経由で Unity Catalog Volumes 上のファイル操作を行う.
-FUSE マウントが使えない環境向け.
+Databricks SDK の Files API 経由で Unity Catalog Volumes 上のファイル操作を行う。
+FUSE マウントが使えない環境向け。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from deepagents.backends.utils import (
     perform_string_replacement,
 )
 
-from .agent_utils import to_real_path, to_virtual_path
+from .paths import to_real_path, to_virtual_path
 
 logger = logging.getLogger(__name__)
 

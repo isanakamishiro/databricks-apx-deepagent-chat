@@ -4,21 +4,14 @@ from urllib.parse import quote
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import NotFound, ResourceDoesNotExist
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..agent_utils import to_real_path, to_virtual_path
+from ..agent import to_real_path, to_virtual_path
 from ..core import Dependencies
 
 router = APIRouter()
-
-
-def _extract_volume_path(request: Request) -> str:
-    vp = request.headers.get("x-uc-volume-path", "")
-    if not vp:
-        raise HTTPException(status_code=400, detail="x-uc-volume-path header required")
-    return vp
 
 
 def _delete_directory_recursive(w: WorkspaceClient, dir_path: str):
@@ -42,8 +35,11 @@ class MkdirRequest(BaseModel):
 
 
 @router.get("/files/list", operation_id="filesList")
-async def files_list(request: Request, ws: Dependencies.UserClient, path: str = Query("/")):
-    volume_path = _extract_volume_path(request)
+async def files_list(
+    volume_path: Dependencies.VolumePath,
+    ws: Dependencies.UserClient,
+    path: str = Query("/"),
+):
     real_path = to_real_path(volume_path, path)
 
     try:
@@ -76,8 +72,11 @@ async def files_list(request: Request, ws: Dependencies.UserClient, path: str = 
 
 
 @router.get("/files/download", operation_id="filesDownload")
-async def files_download(request: Request, ws: Dependencies.UserClient, path: str = Query(...)):
-    volume_path = _extract_volume_path(request)
+async def files_download(
+    volume_path: Dependencies.VolumePath,
+    ws: Dependencies.UserClient,
+    path: str = Query(...),
+):
     real_path = to_real_path(volume_path, path)
 
     try:
@@ -110,12 +109,11 @@ async def files_download(request: Request, ws: Dependencies.UserClient, path: st
 
 @router.post("/files/upload", operation_id="filesUpload")
 async def files_upload(
-    request: Request,
+    volume_path: Dependencies.VolumePath,
     ws: Dependencies.UserClient,
     path: str = Form(...),
     file: UploadFile = File(...),
 ):
-    volume_path = _extract_volume_path(request)
     upload_dir = path if path.endswith("/") else path + "/"
     virtual_path = upload_dir + (file.filename or "upload")
     real_path = to_real_path(volume_path, virtual_path)
@@ -130,8 +128,11 @@ async def files_upload(
 
 
 @router.post("/files/mkdir", operation_id="filesMkdir")
-async def files_mkdir(body: MkdirRequest, request: Request, ws: Dependencies.UserClient):
-    volume_path = _extract_volume_path(request)
+async def files_mkdir(
+    body: MkdirRequest,
+    volume_path: Dependencies.VolumePath,
+    ws: Dependencies.UserClient,
+):
     dir_path = body.path if body.path.endswith("/") else body.path + "/"
     real_path = to_real_path(volume_path, dir_path)
     try:
@@ -143,9 +144,11 @@ async def files_mkdir(body: MkdirRequest, request: Request, ws: Dependencies.Use
 
 @router.delete("/files/delete", operation_id="filesDelete")
 async def files_delete(
-    request: Request, ws: Dependencies.UserClient, path: str = Query(...), is_dir: bool = Query(False)
+    volume_path: Dependencies.VolumePath,
+    ws: Dependencies.UserClient,
+    path: str = Query(...),
+    is_dir: bool = Query(False),
 ):
-    volume_path = _extract_volume_path(request)
     real_path = to_real_path(volume_path, path)
     try:
         if is_dir:

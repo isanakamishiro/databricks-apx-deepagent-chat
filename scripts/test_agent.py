@@ -28,7 +28,8 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 from langchain_core.messages import HumanMessage
 
 from apx_deepagent_chat.backend.agent import init_agent, init_model, load_models_config
-from apx_deepagent_chat.backend.agent_utils import process_agent_astream_events, get_user_workspace_client
+from apx_deepagent_chat.backend.agent.stream import process_agent_astream_events
+from apx_deepagent_chat.backend.agent.clients import get_user_workspace_client
 
 import logging
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)

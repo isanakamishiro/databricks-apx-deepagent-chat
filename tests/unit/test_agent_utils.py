@@ -1,9 +1,9 @@
-"""agent_utils.py の純粋関数ユニットテスト."""
+"""agent/stream.py, agent/paths.py の純粋関数ユニットテスト."""
 from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
-from apx_deepagent_chat.backend.agent_utils import (
+from apx_deepagent_chat.backend.agent.stream import (
     _accumulate_usage,
     _detect_subagent_completions,
     _detect_subagent_starts,
@@ -15,9 +15,8 @@ from apx_deepagent_chat.backend.agent_utils import (
     _log_and_yield,
     _normalize_messages,
     _resolve_subagent_name,
-    to_real_path,
-    to_virtual_path,
 )
+from apx_deepagent_chat.backend.agent.paths import to_real_path, to_virtual_path
 
 
 # ─── to_real_path ────────────────────────────────────────────────────────────
@@ -160,7 +159,7 @@ def test_log_and_yield_returns_same_item():
 
 
 def test_log_and_yield_calls_debug(mocker):
-    mock_logger = mocker.patch("apx_deepagent_chat.backend.agent_utils.logger")
+    mock_logger = mocker.patch("apx_deepagent_chat.backend.agent.stream.logger")
     item = MagicMock()
     item.type = "some.event"
     item.model_dump.return_value = {}

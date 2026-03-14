@@ -1,17 +1,19 @@
-"""LangGraph BaseCheckpointSaver backed by Databricks Unity Catalog Volumes.
+"""
+Databricks Unity Catalog (UC) Volumesをバックエンドとして利用するLangGraph BaseCheckpointSaver。
 
-Stores checkpoint state, intermediate writes, and channel blobs as JSON files
-on a UC Volume using the Databricks SDK Files API.
+Databricks SDKのFiles APIを使用し、チェックポイントの状態、中間書き込み（intermediate writes）、
+およびチャネルBlobをJSONファイルとしてUC Volume上に保存します。
 
-Directory layout under ``{volume_path}/{checkpoint_dir}/``:
+`{volume_path}/{checkpoint_dir}/` 配下のディレクトリ構成：
 
-    checkpoints/{thread_id}/{checkpoint_ns}/{checkpoint_id}.json
-    writes/{thread_id}/{checkpoint_ns}/{checkpoint_id}/{task_id}_{write_idx}.json
-    blobs/{thread_id}/{checkpoint_ns}/{channel}_{version}.json
+- checkpoints/{thread_id}/{checkpoint_ns}/{checkpoint_id}.json
+- writes/{thread_id}/{checkpoint_ns}/{checkpoint_id}/{task_id}_{write_idx}.json
+- blobs/{thread_id}/{checkpoint_ns}/{channel}_{version}.json
 
-UCBundleCheckpointer uses a single bundle.json per thread:
+UCBundleCheckpointerは、スレッドごとに単一の bundle.json を使用します：
 
-    .checkpoints/{thread_id}/bundle.json
+.checkpoints/{thread_id}/bundle.json
+
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from pathlib import PurePosixPath
 from typing import Any, List
 
+import mlflow
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import DatabricksError, NotFound, ResourceDoesNotExist
 from langchain_core.runnables import RunnableConfig
@@ -44,7 +47,6 @@ from langgraph.checkpoint.base import (
     get_checkpoint_metadata,
 )
 from langgraph.checkpoint.memory import InMemorySaver
-import mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -271,9 +273,7 @@ class UCVolumesCheckpointer(
         ns: str = config["configurable"].get("checkpoint_ns", "")
 
         if checkpoint_id := get_checkpoint_id(config):
-            data = self._download_json(
-                self._ckpt_path(thread_id, ns, checkpoint_id)
-            )
+            data = self._download_json(self._ckpt_path(thread_id, ns, checkpoint_id))
             if not data:
                 return None
             checkpoint = self._deserialize_typed(data["checkpoint"])
@@ -314,9 +314,7 @@ class UCVolumesCheckpointer(
             if not ckpt_ids:
                 return None
             checkpoint_id = max(ckpt_ids)
-            data = self._download_json(
-                self._ckpt_path(thread_id, ns, checkpoint_id)
-            )
+            data = self._download_json(self._ckpt_path(thread_id, ns, checkpoint_id))
             if not data:
                 return None
             checkpoint = self._deserialize_typed(data["checkpoint"])
@@ -365,14 +363,10 @@ class UCVolumesCheckpointer(
         else:
             entries = self._list_dir(f"{self._base}/checkpoints")
             thread_ids = [
-                PurePosixPath(e.path).name
-                for e in entries
-                if e.path and e.is_directory
+                PurePosixPath(e.path).name for e in entries if e.path and e.is_directory
             ]
 
-        config_ns = (
-            config["configurable"].get("checkpoint_ns") if config else None
-        )
+        config_ns = config["configurable"].get("checkpoint_ns") if config else None
         config_ckpt_id = get_checkpoint_id(config) if config else None
         before_ckpt_id = get_checkpoint_id(before) if before else None
 
@@ -402,9 +396,7 @@ class UCVolumesCheckpointer(
                     if before_ckpt_id and ckpt_id >= before_ckpt_id:
                         continue
 
-                    data = self._download_json(
-                        self._ckpt_path(thread_id, ns, ckpt_id)
-                    )
+                    data = self._download_json(self._ckpt_path(thread_id, ns, ckpt_id))
                     if not data:
                         continue
                     metadata = self._deserialize_typed(data["metadata"])
@@ -484,9 +476,7 @@ class UCVolumesCheckpointer(
             ),
             "parent_checkpoint_id": config["configurable"].get("checkpoint_id"),
         }
-        self._upload_json(
-            self._ckpt_path(thread_id, ns, checkpoint["id"]), ckpt_data
-        )
+        self._upload_json(self._ckpt_path(thread_id, ns, checkpoint["id"]), ckpt_data)
 
         return {
             "configurable": {
@@ -509,9 +499,7 @@ class UCVolumesCheckpointer(
 
         for idx, (channel, value) in enumerate(writes):
             write_idx = WRITES_IDX_MAP.get(channel, idx)
-            write_file = self._write_path(
-                thread_id, ns, ckpt_id, task_id, write_idx
-            )
+            write_file = self._write_path(thread_id, ns, ckpt_id, task_id, write_idx)
             if write_idx >= 0 and self._file_exists(write_file):
                 continue
 
@@ -544,9 +532,7 @@ class UCVolumesCheckpointer(
         limit: int | None = None,
     ) -> AsyncIterator[CheckpointTuple]:
         results = await asyncio.to_thread(
-            lambda: list(
-                self.list(config, filter=filter, before=before, limit=limit)
-            )
+            lambda: list(self.list(config, filter=filter, before=before, limit=limit))
         )
         for item in results:
             yield item
@@ -623,7 +609,9 @@ class UCVolumesCheckpointer(
         async def _upload_write(idx: int, channel: str, value: Any) -> None:
             write_idx = WRITES_IDX_MAP.get(channel, idx)
             write_file = self._write_path(thread_id, ns, ckpt_id, task_id, write_idx)
-            if write_idx >= 0 and await asyncio.to_thread(self._file_exists, write_file):
+            if write_idx >= 0 and await asyncio.to_thread(
+                self._file_exists, write_file
+            ):
                 return
             write_data = {
                 "task_id": task_id,
@@ -659,6 +647,7 @@ class UCVolumesCheckpointer(
         next_v = current_v + 1
         next_h = random.random()
         return f"{next_v:032}.{next_h:016}"
+
 
 class UCBundleCheckpointer(InMemorySaver):
     """UC Volumes backed checkpointer using a single bundle.json.gz per thread.
@@ -767,43 +756,54 @@ class UCBundleCheckpointer(InMemorySaver):
         storage_rows = []
         for ns, ns_data in self.storage.get(thread_id, {}).items():
             for ckpt_id, (ckpt_bytes, meta_bytes, parent_id) in ns_data.items():
-                storage_rows.append([
-                    ns,
-                    ckpt_id,
-                    ckpt_bytes[0],
-                    base64.b64encode(ckpt_bytes[1]).decode("ascii"),
-                    meta_bytes[0],
-                    base64.b64encode(meta_bytes[1]).decode("ascii"),
-                    parent_id,
-                ])
+                storage_rows.append(
+                    [
+                        ns,
+                        ckpt_id,
+                        ckpt_bytes[0],
+                        base64.b64encode(ckpt_bytes[1]).decode("ascii"),
+                        meta_bytes[0],
+                        base64.b64encode(meta_bytes[1]).decode("ascii"),
+                        parent_id,
+                    ]
+                )
 
         writes_rows = []
         for (tid, ns, ckpt_id), inner_writes in self.writes.items():
             if tid != thread_id:
                 continue
-            for (task_id, write_idx), (t_id, channel, val_bytes, t_path) in inner_writes.items():
-                writes_rows.append([
-                    ns,
-                    ckpt_id,
-                    t_id,
-                    write_idx,
-                    channel,
-                    val_bytes[0],
-                    base64.b64encode(val_bytes[1]).decode("ascii"),
-                    t_path,
-                ])
+            for (task_id, write_idx), (
+                t_id,
+                channel,
+                val_bytes,
+                t_path,
+            ) in inner_writes.items():
+                writes_rows.append(
+                    [
+                        ns,
+                        ckpt_id,
+                        t_id,
+                        write_idx,
+                        channel,
+                        val_bytes[0],
+                        base64.b64encode(val_bytes[1]).decode("ascii"),
+                        t_path,
+                    ]
+                )
 
         blobs_rows = []
         for (tid, ns, channel, version), blob_bytes in self.blobs.items():
             if tid != thread_id:
                 continue
-            blobs_rows.append([
-                ns,
-                channel,
-                str(version),
-                blob_bytes[0],
-                base64.b64encode(blob_bytes[1]).decode("ascii"),
-            ])
+            blobs_rows.append(
+                [
+                    ns,
+                    channel,
+                    str(version),
+                    blob_bytes[0],
+                    base64.b64encode(blob_bytes[1]).decode("ascii"),
+                ]
+            )
 
         bundle = {
             "version": 1,

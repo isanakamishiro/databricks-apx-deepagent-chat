@@ -199,6 +199,7 @@ export interface ListChatsParams {
     user_id: string;
     limit?: number;
     ending_before?: string | null;
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -219,6 +220,9 @@ export const listChats = async (params: ListChatsParams, options?: RequestInit):
         ...options,
         method: "GET",
         headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -289,6 +293,7 @@ export function useListChatsSuspense<TData = {
     });
 }
 export interface SaveChatParams {
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -304,6 +309,9 @@ export const saveChat = async (data: SaveChatRequest, params?: SaveChatParams, o
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -356,6 +364,7 @@ export function useSaveChat(options?: {
 export interface GetChatParams {
     chat_id: string;
     user_id: string;
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -374,6 +383,9 @@ export const getChat = async (params: GetChatParams, options?: RequestInit): Pro
         ...options,
         method: "GET",
         headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -446,6 +458,7 @@ export function useGetChatSuspense<TData = {
 export interface DeleteChatParams {
     chat_id: string;
     user_id: string;
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -464,6 +477,9 @@ export const deleteChat = async (params: DeleteChatParams, options?: RequestInit
         ...options,
         method: "DELETE",
         headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -514,6 +530,7 @@ export function useDeleteChat(options?: {
 export interface GetMessagesParams {
     chat_id: string;
     user_id: string;
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -532,6 +549,9 @@ export const getMessages = async (params: GetMessagesParams, options?: RequestIn
         ...options,
         method: "GET",
         headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -603,6 +623,7 @@ export function useGetMessagesSuspense<TData = {
 }
 export interface SaveMessagesParams {
     chat_id: string;
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -618,6 +639,9 @@ export const saveMessages = async (params: SaveMessagesParams, data: SaveMessage
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -806,6 +830,7 @@ export function useCurrentUserSuspense<TData = {
 export interface FilesDeleteParams {
     path: string;
     is_dir?: boolean;
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -825,6 +850,9 @@ export const filesDelete = async (params: FilesDeleteParams, options?: RequestIn
         ...options,
         method: "DELETE",
         headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -874,6 +902,7 @@ export function useFilesDelete(options?: {
 }
 export interface FilesDownloadParams {
     path: string;
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -892,6 +921,9 @@ export const filesDownload = async (params: FilesDownloadParams, options?: Reque
         ...options,
         method: "GET",
         headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -963,6 +995,7 @@ export function useFilesDownloadSuspense<TData = {
 }
 export interface FilesListParams {
     path?: string;
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -981,6 +1014,9 @@ export const filesList = async (params?: FilesListParams, options?: RequestInit)
         ...options,
         method: "GET",
         headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -1051,6 +1087,7 @@ export function useFilesListSuspense<TData = {
     });
 }
 export interface FilesMkdirParams {
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -1066,6 +1103,9 @@ export const filesMkdir = async (data: MkdirRequest, params?: FilesMkdirParams, 
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),
@@ -1116,6 +1156,7 @@ export function useFilesMkdir(options?: {
     });
 }
 export interface FilesUploadParams {
+    "x-uc-volume-path"?: string | null;
     "X-Forwarded-Host"?: string | null;
     "X-Forwarded-Preferred-Username"?: string | null;
     "X-Forwarded-User"?: string | null;
@@ -1130,6 +1171,9 @@ export const filesUpload = async (data: FormData, params?: FilesUploadParams, op
         ...options,
         method: "POST",
         headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
             ...(params?.["X-Forwarded-Host"] != null && {
                 "X-Forwarded-Host": params["X-Forwarded-Host"]
             }),

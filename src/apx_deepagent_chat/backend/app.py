@@ -1,26 +1,24 @@
 # これらは環境変数等の設定を鑑みて先にロードする
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRoute
+from mlflow.genai.agent_server import (
+    AgentServer,
+    setup_mlflow_git_based_version_tracking,
+)
 
+from .._metadata import dist_dir
+from .agent import (  # also registers @invoke / @stream handlers
+    _injected_sp_ws_client,
+    _injected_user_ws_client,
+)
 from .core._base import LifespanDependency
 from .core._factory import _chain_dep_lifespans
 from .core._static import CachedStaticFiles, add_not_found_handler
 from .core.dependencies import Dependencies
-from .router import router as api_router
-from .._metadata import dist_dir
-from .agent_utils import _injected_user_ws_client, _injected_sp_ws_client
-
-# normal import
-
-import logging
-
-from mlflow.genai.agent_server import AgentServer, setup_mlflow_git_based_version_tracking
-
-
-# Import agent to register @invoke / @stream handlers with AgentServer
-from . import agent  # noqa: F401
+from .routers import router as api_router
 
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
@@ -50,11 +48,19 @@ def create_server_app() -> FastAPI:
 
     # /responses ハンドラを /api/chat にも登録（dev プロキシは /api のみバックエンドへ転送するため）
     _responses_handler = next(
-        (r.endpoint for r in app.routes if isinstance(r, APIRoute) and r.path == "/responses"),
+        (
+            r.endpoint
+            for r in app.routes
+            if isinstance(r, APIRoute) and r.path == "/responses"
+        ),
         None,
     )
 
-    if _responses_handler:
+    if _responses_handler is None:
+        logging.warning(
+            "AgentServer did not register /responses endpoint; /api/chat will not be available"
+        )
+    else:
         _handler = _responses_handler  # Pyright narrowing: non-None capture
 
         @app.post("/api/chat", operation_id="chat")

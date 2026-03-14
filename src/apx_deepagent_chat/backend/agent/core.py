@@ -1,10 +1,8 @@
 import asyncio
 import functools
 import logging
-import os
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
 
 import mlflow
@@ -12,21 +10,14 @@ import mlflow.config
 import uuid_utils
 import yaml
 from databricks.sdk import WorkspaceClient
-from databricks_langchain import (
-    ChatDatabricks,
-    DatabricksMCPServer,
-    DatabricksMultiServerMCPClient,
-)
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.backends.utils import create_file_data
 from deepagents.middleware.summarization import (
     create_summarization_tool_middleware,
 )
-from langchain.agents.middleware import wrap_model_call, wrap_tool_call, ToolCallLimitMiddleware
+from langchain.agents.middleware import ToolCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage, ToolMessage
-from langchain_core.tools import tool as langchain_tool
 from mlflow.genai.agent_server import invoke, stream
 from mlflow.types.responses import (
     ResponsesAgentRequest,
@@ -36,38 +27,30 @@ from mlflow.types.responses import (
 )
 from mlflow.types.responses_helpers import ResponseError
 
-from .core._base import LifespanDependency
+from ..core._base import LifespanDependency
+from .clients import get_sp_workspace_client, get_user_workspace_client
+from .middleware import flatten_system_message, strip_content_block_ids
+from .model import (
+    ASSETS_DIR,
+    FAKE_MODEL_NAME,
+    USE_FAKE_MODEL,
+    init_model,
+    load_models_config,
+)
+from .stream import process_agent_astream_events
+from .lc_tools import get_current_time, web_fetch, web_search
+from .mcp_tools import get_mcp_tools
 from .uc_backend import UCVolumesBackend
 from .uc_checkpointer import UCBundleCheckpointer
-from .agent_utils import (
-    get_databricks_host_from_env,
-    get_sp_workspace_client,
-    get_user_workspace_client,
-    process_agent_astream_events,
-)
 
 mlflow.langchain.autolog()
 # Enable async logging
 mlflow.config.enable_async_logging()
 
-USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
-FAKE_MODEL_NAME = "_fake-model-for-testing"
-ASSETS_DIR = Path(__file__).parent.parent / "assets"
-
-
 _SYSTEM_PROMPT_PATH = ASSETS_DIR / "system_prompt.md"
 _SUBAGENTS_CONFIG_PATH = ASSETS_DIR / "subagents.yaml"
 _TEXT_SUFFIXES = {".md", ".py", ".txt"}
 
-# --- Module-level caches ---
-_MCP_TOOLS_TTL_SECONDS = 30 * 60  # 30 minutes
-_mcp_tools_cache: list | None = None
-_mcp_tools_cached_at: float = 0.0
-_mcp_tools_lock = asyncio.Lock()
-_tool_call_semaphore = asyncio.Semaphore(4)
-
-
-# --- スタートアップ時プリウォーム ---
 logger = logging.getLogger(__name__)
 
 
@@ -83,7 +66,7 @@ class _AgentPrewarm(LifespanDependency):
         t0 = time.monotonic()
         try:
             await asyncio.gather(
-                _get_mcp_tools(get_sp_workspace_client()),
+                get_mcp_tools(get_user_workspace_client()),
                 asyncio.to_thread(_load_subagents, _SUBAGENTS_CONFIG_PATH),
                 asyncio.to_thread(_load_system_prompt, _SYSTEM_PROMPT_PATH),
                 asyncio.to_thread(_load_preset_files),
@@ -92,105 +75,6 @@ class _AgentPrewarm(LifespanDependency):
         except Exception:
             logger.warning("[prewarm] failed (non-fatal)", exc_info=True)
         yield
-
-@wrap_tool_call  # type: ignore[arg-type]
-async def strip_content_block_ids(request, handler):
-    """MCP ツール結果の content block から id/index フィールドを除去し、同時実行数を制限する.
-
-    langchain_core の create_text_block() が自動付与する id フィールドが
-    Databricks Model Serving 経由の Anthropic API でバリデーションエラーを
-    引き起こすため、ツール実行後に除去する。
-    また、MCP ツールの同時実行数をセマフォで制限し TaskGroup エラーを防ぐ。
-    """
-    async with _tool_call_semaphore:
-        result = await handler(request)
-    if isinstance(result, ToolMessage) and isinstance(result.content, list):
-        result.content = [
-            (
-                {k: v for k, v in block.items() if k not in ("id", "index")}
-                if isinstance(block, dict)
-                else block
-            )
-            for block in result.content
-        ]
-    return result
-
-
-@wrap_model_call  # type: ignore[arg-type]
-async def flatten_system_message(request, handler):
-    """SystemMessage の content block リストをプレーン文字列に正規化する.
-
-    deepagents の append_to_system_message が生成する
-    [{"type": "text", "text": "..."}] 形式を、Gemini API が受け付ける
-    単純な文字列に変換する。
-    """
-    if request.system_message and isinstance(request.system_message.content, list):
-        parts = []
-        for block in request.system_message.content:
-            if isinstance(block, dict) and "text" in block:
-                parts.append(block["text"])
-            elif isinstance(block, str):
-                parts.append(block)
-        request.system_message = SystemMessage(content="\n\n".join(parts))
-    return await handler(request)
-
-
-
-@functools.cache
-def load_models_config() -> dict:
-    config_path = ASSETS_DIR / "models.yaml"
-    with open(config_path) as f:
-        return yaml.safe_load(f)["models"]
-
-@functools.cache
-def _make_fake_model():
-    """FakeListChatModel を構築して返す（開発モード用）."""
-    from langchain_core.language_models.fake_chat_models import FakeListChatModel
-
-    FAKE_RESPONSE = "こんにちは！私は元気です！"
-
-    class ToolCapableFakeModel(FakeListChatModel):
-        def bind_tools(self, tools, **kwargs):
-            return self
-
-    return ToolCapableFakeModel(responses=[FAKE_RESPONSE] * 20)
-
-def _init_mcp_client(
-    workspace_client: WorkspaceClient,
-) -> DatabricksMultiServerMCPClient:
-    host_name = get_databricks_host_from_env()
-    return DatabricksMultiServerMCPClient(
-        [
-            DatabricksMCPServer(
-                name="system-ai",
-                url=f"{host_name}/api/2.0/mcp/functions/system/ai",
-                workspace_client=workspace_client,
-            ),
-        ]
-    )
-
-
-async def _get_mcp_tools(workspace_client: WorkspaceClient) -> list:
-    """MCP ツール一覧を取得しキャッシュする（TTL: 30分）。"""
-    global _mcp_tools_cache, _mcp_tools_cached_at
-    now = time.monotonic()
-    if (
-        _mcp_tools_cache is not None
-        and (now - _mcp_tools_cached_at) < _MCP_TOOLS_TTL_SECONDS
-    ):
-        return _mcp_tools_cache
-
-    async with _mcp_tools_lock:
-        if (
-            _mcp_tools_cache is not None
-            and (now - _mcp_tools_cached_at) < _MCP_TOOLS_TTL_SECONDS
-        ):
-            return _mcp_tools_cache
-        mcp_client = _init_mcp_client(workspace_client)
-        tools = await mcp_client.get_tools()
-        _mcp_tools_cache = tools
-        _mcp_tools_cached_at = time.monotonic()
-        return tools
 
 
 def _get_model_name(request: ResponsesAgentRequest) -> str:
@@ -206,10 +90,7 @@ def _get_volume_path(request: ResponsesAgentRequest) -> str:
     ci = dict(request.custom_inputs or {})
     if "volume_path" in ci and ci["volume_path"]:
         return str(ci["volume_path"])
-    raise ValueError(
-        "UC Volume Path が設定されていません。"
-        "サイドバーの設定から Volume Path を入力してください。"
-    )
+    raise ValueError("UC Volume Path が設定されていません。")
 
 
 def _get_or_create_thread_id(request: ResponsesAgentRequest) -> str:
@@ -231,92 +112,8 @@ def _get_or_create_thread_id(request: ResponsesAgentRequest) -> str:
     return str(uuid_utils.uuid7())
 
 
-# --- クロージャ不要なツール（モジュールレベルで1回だけ生成） ---
-
-
-@langchain_tool
-def web_search(query: str, max_results: int = 5, region: str = "jp-jp", timelimit: Optional[str] = None) -> str:
-    """DuckDuckGoでWeb検索を行い、結果を返します。最新情報や不明な事実を調べる場合に使用してください。
-
-    Args:
-        query: 検索クエリ。
-        max_results: 返す検索結果の最大件数。デフォルトは5。
-        region: 検索対象の地域コード。デフォルトは"jp-jp"(日本)。例: "us-en", "uk-en", "de-de"。
-        timelimit: 検索結果の期間フィルタ。"d"(1日以内), "w"(1週間以内), "m"(1ヶ月以内), "y"(1年以内)。デフォルトはNone(制限なし)。
-    """
-    from ddgs import DDGS
-
-    try:
-        results = list(DDGS().text(query, region=region, max_results=max_results, timelimit=timelimit))
-    except TimeoutError:
-        return (
-            "検索エラー: リクエストがタイムアウトしました。後でもう一度試してください。"
-        )
-    except Exception as e:
-        return f"検索エラー: 予期しないエラーが発生しました: {type(e).__name__}: {e}"
-
-    if not results:
-        return "検索結果が見つかりませんでした。"
-
-    lines = []
-    for i, r in enumerate(results, 1):
-        lines.append(f"### {i}. {r.get('title', '(タイトルなし)')}")
-        lines.append(f"URL: {r.get('href', '(URLなし)')}")
-        lines.append(f"{r.get('body', '')}\n")
-    return "\n".join(lines)
-
-
-@langchain_tool
-def web_fetch(url: str, max_length: int = 50000) -> str:
-    """URLのWebページを取得し、Markdown形式に変換して返します。Webページの内容を読み取りたい場合に使用してください。
-
-    Args:
-        url: 取得するWebページのURL。
-        max_length: 返すテキストの最大文字数。デフォルトは50000。
-    """
-    import requests
-    from markitdown import MarkItDown
-
-    try:
-        md = MarkItDown()
-        result = md.convert_url(url)
-    except requests.ConnectionError:
-        return f"取得エラー: URL '{url}' に接続できませんでした。URLが正しいか確認してください。"
-    except requests.Timeout:
-        return f"取得エラー: URL '{url}' への接続がタイムアウトしました。"
-    except requests.HTTPError as e:
-        return f"取得エラー: HTTPエラーが発生しました (ステータス {e.response.status_code if e.response else '不明'}): {e}"
-    except Exception as e:
-        return f"取得エラー: 予期しないエラーが発生しました: {type(e).__name__}: {e}"
-
-    text = result.text_content
-    if not text or not text.strip():
-        return f"取得エラー: URL '{url}' からコンテンツを抽出できませんでした。"
-    if len(text) > max_length:
-        text = text[:max_length] + "\n\n... (truncated)"
-    return text
-
-
-@langchain_tool
-def get_current_time(timezone: str = "Asia/Tokyo") -> str:
-    """現在の日時を返します。日時の確認が必要な場合に使用してください。
-
-    Args:
-        timezone: タイムゾーン名。デフォルトは"Asia/Tokyo"。例: "UTC", "US/Eastern", "Europe/London"。
-    """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    try:
-        tz = ZoneInfo(timezone)
-    except KeyError:
-        return f"エラー: 不明なタイムゾーン '{timezone}'"
-    now = datetime.now(tz)
-    return now.strftime("%Y-%m-%d %H:%M:%S %Z")
-
-
 @functools.cache
-def _load_subagents(config_path: Path) -> list:
+def _load_subagents(config_path) -> list:
     """Load subagent definitions from YAML and wire up tools (cached).
 
     Note: callers must shallow-copy returned dicts before mutating (e.g. ``sa = {**sa}``).
@@ -358,7 +155,7 @@ def _load_subagents(config_path: Path) -> list:
 
 
 @functools.cache
-def _load_system_prompt(prompt_path: Path) -> str:
+def _load_system_prompt(prompt_path) -> str:
     """Load system prompt from file (cached)."""
     return prompt_path.read_text()
 
@@ -368,11 +165,6 @@ def _load_preset_files() -> dict[str, Any]:
     """assets/ ディレクトリのファイルデータをキャッシュして返す。"""
 
     files: dict[str, Any] = {}
-
-    # assets/AGENTS.md -> /AGENTS.md (CompositeBackend が /preset/ を除去して渡すキー)
-    # agents_md_path = ASSETS_DIR / "AGENTS.md"
-    # if agents_md_path.exists():
-    #     files["/AGENTS.md"] = create_file_data(agents_md_path.read_text())
 
     # assets/skills/** -> /skills/**
     skills_dir = ASSETS_DIR / "skills"
@@ -428,31 +220,6 @@ def _build_subagents(
     return result
 
 
-def init_model(model_name: str, ws: Optional[WorkspaceClient] = None):
-    if model_name == FAKE_MODEL_NAME:
-        return _make_fake_model()
-
-    ws_client = ws or get_sp_workspace_client()
-    model = ChatDatabricks(
-        model=model_name,
-        workspace_client=ws_client,
-        temperature=0,
-        use_responses_api=False,
-    )
-    if not model.profile:
-        model_config = load_models_config().get(model_name, {})
-        model.profile = model_config.get("profile", {
-            "max_input_tokens": 200000,
-            "max_output_tokens": 10000,
-            "text_inputs": True,
-            "tool_choice": True,
-            "tool_calling": True,
-            "structured_output": True,
-            "text_outputs": True,
-        })
-    return model
-
-
 @mlflow.trace(span_type="UNKNOWN")
 async def init_agent(
     model: BaseChatModel,
@@ -466,19 +233,20 @@ async def init_agent(
     if not volume_path:
         raise ValueError("volume_path is required")
 
-    # MCP ツールは常にサービスプリンシパルで取得（ユーザー認証不要なワークスペース全体のツール）
-    mcp_tools = await _get_mcp_tools(get_sp_workspace_client())
+    mcp_tools = await get_mcp_tools(ws_client)
 
-    backend = lambda rt: CompositeBackend(
-        default=UCVolumesBackend(
-            volume_path=volume_path,
-            workspace_client=ws_client,
-        ),
-        routes={
-            "/preset/": StateBackend(rt),
-        },
-    )
-    middleware=[
+    def backend(rt):
+        return CompositeBackend(
+            default=UCVolumesBackend(
+                volume_path=volume_path,
+                workspace_client=ws_client,
+            ),
+            routes={
+                "/preset/": StateBackend(rt),
+            },
+        )
+
+    middleware = [
         strip_content_block_ids,
         flatten_system_message,
         create_summarization_tool_middleware(model, backend),
@@ -564,7 +332,9 @@ async def streaming(
         )
 
         async with checkpointer:
-            model_name = _get_model_name(request) if not USE_FAKE_MODEL else FAKE_MODEL_NAME
+            model_name = (
+                _get_model_name(request) if not USE_FAKE_MODEL else FAKE_MODEL_NAME
+            )
             model = init_model(
                 model_name=model_name,
                 ws=user_workspace_client,
@@ -588,7 +358,6 @@ async def streaming(
             }
             config = {"configurable": {"thread_id": thread_id}}
 
-            max_ctx = 0
             usage_accumulator: dict[str, int] = {
                 "input_tokens": 0,
                 "output_tokens": 0,
@@ -597,7 +366,7 @@ async def streaming(
             async for event in process_agent_astream_events(
                 agent.astream(
                     input=messages,
-                    config=config,  # type: ignore[arg-type]
+                    config=config,
                     stream_mode=["updates", "messages"],
                     subgraphs=True,
                     version="v2",
