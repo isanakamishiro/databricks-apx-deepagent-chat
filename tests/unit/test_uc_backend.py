@@ -3,7 +3,7 @@ import pytest
 from databricks.sdk.errors import NotFound
 from unittest.mock import MagicMock
 
-from apx_deepagent_chat.backend.uc_backend import UCVolumesBackend
+from apx_deepagent_chat.backend.agent.uc_backend import UCVolumesBackend
 
 
 @pytest.fixture

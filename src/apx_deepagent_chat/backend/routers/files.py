@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..agent_utils import to_real_path, to_virtual_path
+from ..agent import to_real_path, to_virtual_path
 from ..core import Dependencies
 
 router = APIRouter()

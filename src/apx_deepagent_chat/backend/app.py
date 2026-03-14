@@ -1,8 +1,10 @@
 # これらは環境変数等の設定を鑑みて先にロードする
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRoute
+from mlflow.genai.agent_server import AgentServer, setup_mlflow_git_based_version_tracking
 
 from .core._base import LifespanDependency
 from .core._factory import _chain_dep_lifespans
@@ -10,17 +12,7 @@ from .core._static import CachedStaticFiles, add_not_found_handler
 from .core.dependencies import Dependencies
 from .router import router as api_router
 from .._metadata import dist_dir
-from .agent_utils import _injected_user_ws_client, _injected_sp_ws_client
-
-# normal import
-
-import logging
-
-from mlflow.genai.agent_server import AgentServer, setup_mlflow_git_based_version_tracking
-
-
-# Import agent to register @invoke / @stream handlers with AgentServer
-from . import agent  # noqa: F401
+from .agent import _injected_user_ws_client, _injected_sp_ws_client  # also registers @invoke / @stream handlers
 
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
@@ -54,7 +46,9 @@ def create_server_app() -> FastAPI:
         None,
     )
 
-    if _responses_handler:
+    if _responses_handler is None:
+        logging.warning("AgentServer did not register /responses endpoint; /api/chat will not be available")
+    else:
         _handler = _responses_handler  # Pyright narrowing: non-None capture
 
         @app.post("/api/chat", operation_id="chat")
