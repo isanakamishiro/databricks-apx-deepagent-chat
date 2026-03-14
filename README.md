@@ -83,6 +83,26 @@ apx dev check
 apx dev stop
 ```
 
+## Testing
+
+```bash
+# すべてのテストを実行 (統合テストを除く)
+uv run pytest -m "not integration"
+
+# ユニットテストのみ
+uv run pytest tests/unit/
+
+# API テストのみ
+uv run pytest tests/api/
+
+# カバレッジレポートを表示 (デフォルトで自動付与)
+uv run pytest -m "not integration" --cov-report=html
+
+# 統合テスト (実 Databricks 接続が必要)
+export TEST_VOLUME_PATH=/Volumes/<catalog>/<schema>/<volume>
+uv run pytest -m integration
+```
+
 ## Deployment
 
 ```bash
