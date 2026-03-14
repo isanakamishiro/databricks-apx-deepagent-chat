@@ -366,7 +366,7 @@ async def streaming(
             async for event in process_agent_astream_events(
                 agent.astream(
                     input=messages,
-                    config=config,  # type: ignore[arg-type]
+                    config=config,
                     stream_mode=["updates", "messages"],
                     subgraphs=True,
                     version="v2",
