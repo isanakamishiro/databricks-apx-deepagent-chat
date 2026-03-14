@@ -31,6 +31,6 @@ def to_virtual_path(volume_path: str, real_path: str) -> str:
     # read_files の _metadata.file_path は "dbfs:" プレフィクスが付く場合がある
     path = real_path.removeprefix("dbfs:")
     if path.startswith(prefix):
-        rest = path[len(prefix):]
+        rest = path[len(prefix) :]
         return rest if rest.startswith("/") else "/" + rest
     return real_path

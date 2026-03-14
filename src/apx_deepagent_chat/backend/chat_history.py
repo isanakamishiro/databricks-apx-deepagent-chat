@@ -172,7 +172,6 @@ class ChatHistoryStore:
             else:
                 index = []
 
-        extended_limit = limit + 1
         has_more = len(index) > limit
         chats = index[:limit] if has_more else index
 

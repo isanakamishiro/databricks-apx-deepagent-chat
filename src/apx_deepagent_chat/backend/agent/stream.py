@@ -131,7 +131,9 @@ def _filter_main_agent_messages(msgs: list) -> list:
     for msg in msgs:
         if isinstance(msg, ToolMessage):
             filtered.append(msg)
-        elif isinstance(msg, (AIMessage, AIMessageChunk)) and getattr(msg, "tool_calls", None):
+        elif isinstance(msg, (AIMessage, AIMessageChunk)) and getattr(
+            msg, "tool_calls", None
+        ):
             filtered.append(AIMessage(content="", tool_calls=msg.tool_calls, id=msg.id))
     return filtered
 
@@ -177,7 +179,9 @@ def _process_main_agent_messages(
                 state.text_item_id = chunk.id
                 yield _log_and_yield(
                     ResponsesAgentStreamEvent(
-                        **create_text_delta(delta=text, item_id=chunk.id or str(uuid4()))
+                        **create_text_delta(
+                            delta=text, item_id=chunk.id or str(uuid4())
+                        )
                     )
                 )
     except Exception as e:
@@ -198,7 +202,8 @@ def _finalize_stream(
         state.output_items.append(text_output_item)
         yield _log_and_yield(
             ResponsesAgentStreamEvent(
-                type="response.output_item.done", item=text_output_item  # type: ignore[call-arg]
+                type="response.output_item.done",
+                item=text_output_item,  # type: ignore[call-arg]
             )
         )
 
