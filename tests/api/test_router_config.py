@@ -13,7 +13,7 @@ def test_get_config_success(client):
         },
     }
     with patch(
-        "apx_deepagent_chat.backend.routers.config.load_models_config", return_value=models
+        "apx_deepagent_chat.backend.routers.system.load_models_config", return_value=models
     ):
         response = client.get("/api/config")
     assert response.status_code == 200
@@ -30,7 +30,7 @@ def test_get_config_default_model(client):
         "model-b": {"display_name": "Model B", "default": True},
     }
     with patch(
-        "apx_deepagent_chat.backend.routers.config.load_models_config", return_value=models
+        "apx_deepagent_chat.backend.routers.system.load_models_config", return_value=models
     ):
         response = client.get("/api/config")
     assert response.status_code == 200
@@ -42,7 +42,7 @@ def test_get_config_model_display_names(client):
         "model-x": {"display_name": "Model X", "default": True},
     }
     with patch(
-        "apx_deepagent_chat.backend.routers.config.load_models_config", return_value=models
+        "apx_deepagent_chat.backend.routers.system.load_models_config", return_value=models
     ):
         response = client.get("/api/config")
     data = response.json()

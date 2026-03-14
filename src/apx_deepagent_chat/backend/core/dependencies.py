@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TypeAlias
 from ._defaults import ConfigDependency, ClientDependency, UserWorkspaceClientDependency
 from ._headers import HeadersDependency
+from ._volume_path import VolumePathDependency
 
 
 class Dependencies:
@@ -24,3 +25,7 @@ class Dependencies:
     Headers: TypeAlias = HeadersDependency
     """Databricks Apps HTTP headers for the current request.
     Recommended usage: `headers: Dependencies.Headers`"""
+
+    VolumePath: TypeAlias = VolumePathDependency
+    """Volume path from x-uc-volume-path header.
+    Recommended usage: `volume_path: Dependencies.VolumePath`"""

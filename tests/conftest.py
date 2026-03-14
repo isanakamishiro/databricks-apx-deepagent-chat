@@ -29,7 +29,7 @@ def app(mock_ws, mock_config):
     from apx_deepagent_chat.backend.routers.chat_history import router as chat_history_router
     from apx_deepagent_chat.backend.routers.files import router as files_router
     from apx_deepagent_chat.backend.routers.volumes import router as volumes_router
-    from apx_deepagent_chat.backend.routers.config import router as config_router
+    from apx_deepagent_chat.backend.routers.system import router as system_router
 
     test_app = FastAPI()
     test_app.state.config = mock_config
@@ -42,7 +42,7 @@ def app(mock_ws, mock_config):
     test_app.include_router(chat_history_router, prefix="/api")
     test_app.include_router(files_router, prefix="/api")
     test_app.include_router(volumes_router, prefix="/api")
-    test_app.include_router(config_router, prefix="/api")
+    test_app.include_router(system_router, prefix="/api")
 
     return test_app
 

@@ -10,7 +10,7 @@ from .core._base import LifespanDependency
 from .core._factory import _chain_dep_lifespans
 from .core._static import CachedStaticFiles, add_not_found_handler
 from .core.dependencies import Dependencies
-from .router import router as api_router
+from .routers import router as api_router
 from .._metadata import dist_dir
 from .agent import _injected_user_ws_client, _injected_sp_ws_client  # also registers @invoke / @stream handlers
 
