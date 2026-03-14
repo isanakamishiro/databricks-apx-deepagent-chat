@@ -2,13 +2,13 @@ import asyncio
 import functools
 import logging
 import time
-import yaml
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Optional
 
 import mlflow
 import mlflow.config
 import uuid_utils
+import yaml
 from databricks.sdk import WorkspaceClient
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, StateBackend
@@ -28,20 +28,20 @@ from mlflow.types.responses import (
 from mlflow.types.responses_helpers import ResponseError
 
 from ..core._base import LifespanDependency
-from .uc_backend import UCVolumesBackend
-from .uc_checkpointer import UCBundleCheckpointer
 from .clients import get_sp_workspace_client, get_user_workspace_client
 from .middleware import flatten_system_message, strip_content_block_ids
 from .model import (
     ASSETS_DIR,
     FAKE_MODEL_NAME,
     USE_FAKE_MODEL,
-    _make_fake_model,
     init_model,
     load_models_config,
 )
 from .stream import process_agent_astream_events
-from .tools import _get_mcp_tools, get_current_time, web_fetch, web_search
+from .lc_tools import get_current_time, web_fetch, web_search
+from .mcp_tools import get_mcp_tools
+from .uc_backend import UCVolumesBackend
+from .uc_checkpointer import UCBundleCheckpointer
 
 mlflow.langchain.autolog()
 # Enable async logging
@@ -66,7 +66,7 @@ class _AgentPrewarm(LifespanDependency):
         t0 = time.monotonic()
         try:
             await asyncio.gather(
-                _get_mcp_tools(get_user_workspace_client()),
+                get_mcp_tools(get_user_workspace_client()),
                 asyncio.to_thread(_load_subagents, _SUBAGENTS_CONFIG_PATH),
                 asyncio.to_thread(_load_system_prompt, _SYSTEM_PROMPT_PATH),
                 asyncio.to_thread(_load_preset_files),
@@ -84,15 +84,14 @@ def _get_model_name(request: ResponsesAgentRequest) -> str:
         return str(ci["llm_model"])
     return next(k for k, v in load_models_config().items() if v.get("default"))
 
+
 def _get_volume_path(request: ResponsesAgentRequest) -> str:
     """Extract volume_path from custom_inputs."""
     ci = dict(request.custom_inputs or {})
     if "volume_path" in ci and ci["volume_path"]:
         return str(ci["volume_path"])
-    raise ValueError(
-        "UC Volume Path が設定されていません。"
-        "サイドバーの設定から Volume Path を入力してください。"
-    )
+    raise ValueError("UC Volume Path が設定されていません。")
+
 
 def _get_or_create_thread_id(request: ResponsesAgentRequest) -> str:
     """Extract thread_id from request, falling back to a generated UUID7.
@@ -234,17 +233,19 @@ async def init_agent(
     if not volume_path:
         raise ValueError("volume_path is required")
 
-    mcp_tools = await _get_mcp_tools(ws_client)
+    mcp_tools = await get_mcp_tools(ws_client)
 
-    backend = lambda rt: CompositeBackend(
-        default=UCVolumesBackend(
-            volume_path=volume_path,
-            workspace_client=ws_client,
-        ),
-        routes={
-            "/preset/": StateBackend(rt),
-        },
-    )
+    def backend(rt):
+        return CompositeBackend(
+            default=UCVolumesBackend(
+                volume_path=volume_path,
+                workspace_client=ws_client,
+            ),
+            routes={
+                "/preset/": StateBackend(rt),
+            },
+        )
+
     middleware = [
         strip_content_block_ids,
         flatten_system_message,
@@ -331,7 +332,9 @@ async def streaming(
         )
 
         async with checkpointer:
-            model_name = _get_model_name(request) if not USE_FAKE_MODEL else FAKE_MODEL_NAME
+            model_name = (
+                _get_model_name(request) if not USE_FAKE_MODEL else FAKE_MODEL_NAME
+            )
             model = init_model(
                 model_name=model_name,
                 ws=user_workspace_client,

@@ -1,60 +1,15 @@
-import asyncio
-import time
 from typing import Optional
 
-from databricks.sdk import WorkspaceClient
-from databricks_langchain import DatabricksMCPServer, DatabricksMultiServerMCPClient
 from langchain_core.tools import tool as langchain_tool
-
-from .clients import get_databricks_host_from_env
-
-# --- MCP ツールキャッシュ ---
-_MCP_TOOLS_TTL_SECONDS = 30 * 60  # 30 minutes
-_mcp_tools_cache: list | None = None
-_mcp_tools_cached_at: float = 0.0
-_mcp_tools_lock = asyncio.Lock()
-
-
-def _init_mcp_client(
-    workspace_client: WorkspaceClient,
-) -> DatabricksMultiServerMCPClient:
-    host_name = get_databricks_host_from_env()
-    return DatabricksMultiServerMCPClient(
-        [
-            DatabricksMCPServer(
-                name="system-ai",
-                url=f"{host_name}/api/2.0/mcp/functions/system/ai",
-                workspace_client=workspace_client,
-            ),
-        ]
-    )
-
-
-async def _get_mcp_tools(workspace_client: WorkspaceClient) -> list:
-    """MCP ツール一覧を取得しキャッシュする（TTL: 30分）。"""
-    global _mcp_tools_cache, _mcp_tools_cached_at
-    now = time.monotonic()
-    if (
-        _mcp_tools_cache is not None
-        and (now - _mcp_tools_cached_at) < _MCP_TOOLS_TTL_SECONDS
-    ):
-        return _mcp_tools_cache
-
-    async with _mcp_tools_lock:
-        if (
-            _mcp_tools_cache is not None
-            and (now - _mcp_tools_cached_at) < _MCP_TOOLS_TTL_SECONDS
-        ):
-            return _mcp_tools_cache
-        mcp_client = _init_mcp_client(workspace_client)
-        tools = await mcp_client.get_tools()
-        _mcp_tools_cache = tools
-        _mcp_tools_cached_at = time.monotonic()
-        return tools
 
 
 @langchain_tool
-def web_search(query: str, max_results: int = 5, region: str = "jp-jp", timelimit: Optional[str] = None) -> str:
+def web_search(
+    query: str,
+    max_results: int = 5,
+    region: str = "jp-jp",
+    timelimit: Optional[str] = None,
+) -> str:
     """DuckDuckGoでWeb検索を行い、結果を返します。最新情報や不明な事実を調べる場合に使用してください。
 
     Args:
@@ -66,7 +21,11 @@ def web_search(query: str, max_results: int = 5, region: str = "jp-jp", timelimi
     from ddgs import DDGS
 
     try:
-        results = list(DDGS().text(query, region=region, max_results=max_results, timelimit=timelimit))
+        results = list(
+            DDGS().text(
+                query, region=region, max_results=max_results, timelimit=timelimit
+            )
+        )
     except TimeoutError:
         return (
             "検索エラー: リクエストがタイムアウトしました。後でもう一度試してください。"
