@@ -28,6 +28,9 @@ resources:
         - files.files
         - serving.serving-endpoints
         - catalog.connections
+        - catalog.catalogs:read
+        - catalog.schemas:read
+        - sql
       resources:
         - name: "experiment"
           description: "MLflow experiment for apx-deepagent-chat"
