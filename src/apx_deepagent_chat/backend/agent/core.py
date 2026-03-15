@@ -29,6 +29,8 @@ from mlflow.types.responses_helpers import ResponseError
 
 from ..core._base import LifespanDependency
 from .clients import get_sp_workspace_client, get_user_workspace_client
+from .lc_tools import get_current_time, web_fetch, web_search
+from .mcp_tools import get_mcp_tools
 from .middleware import flatten_system_message, strip_content_block_ids
 from .model import (
     ASSETS_DIR,
@@ -38,8 +40,6 @@ from .model import (
     load_models_config,
 )
 from .stream import process_agent_astream_events
-from .lc_tools import get_current_time, web_fetch, web_search
-from .mcp_tools import get_mcp_tools
 from .uc_backend import UCVolumesBackend
 from .uc_checkpointer import UCBundleCheckpointer
 
@@ -356,7 +356,9 @@ async def streaming(
                 "messages": [all_messages[-1]] if all_messages else [],
                 "files": _load_preset_files(),
             }
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {
+                "configurable": {"thread_id": thread_id, "model_name": model_name}
+            }
 
             usage_accumulator: dict[str, int] = {
                 "input_tokens": 0,

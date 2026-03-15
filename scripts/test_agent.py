@@ -14,24 +14,24 @@
 """
 
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
 
-# プロジェクトの src ディレクトリを Python パスに追加
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent.parent / ".env")
-
 from langchain_core.messages import HumanMessage
 
-from apx_deepagent_chat.backend.agent import init_agent, init_model, load_models_config
-from apx_deepagent_chat.backend.agent.stream import process_agent_astream_events
+from apx_deepagent_chat.backend.agent import init_agent, init_model
 from apx_deepagent_chat.backend.agent.clients import get_user_workspace_client
+from apx_deepagent_chat.backend.agent.core import _load_preset_files
+from apx_deepagent_chat.backend.agent.model import load_models_config
+from apx_deepagent_chat.backend.agent.stream import process_agent_astream_events
 
-import logging
+# プロジェクトの src ディレクトリを Python パスに追加
+# sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
 # --- 設定 ---
@@ -40,16 +40,31 @@ USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
 VOLUME_PATH = os.getenv("TEST_VOLUME_PATH", "")
 
 TEST_CASES = [
-    {
-        "name": "基本的な質問",
-        "message": "今日の日付を必ずサブエージェントを使って確認してください",
-        "thread_id": "test-001",
-    },
+    # {
+    #     "name": "Skill実行",
+    #     "message": "Databricksについて調査して",
+    #     "thread_id": "test-000",
+    # },
+    # {
+    #     "name": "基本的な質問",
+    #     "message": "今日の日付を必ずサブエージェントを使って確認してください",
+    #     "thread_id": "test-001",
+    # },
     # {
     #     "name": "ツールを使うタスク",
     #     "message": "現在の東京の時刻を教えてください",
     #     "thread_id": "test-002",
     # },
+    # {
+    #     "name": "content-writer",
+    #     "message": "https://blog.langchain.com/autonomous-context-compression/ の内容を日本語に翻訳して記事化して",
+    #     "thread_id": "test-003",
+    # },
+    {
+        "name": "content-writer",
+        "message": "/qiita_articles/20260315_201728_autonomous-context-compression.md を使ってblog記事を作って",
+        "thread_id": "test-004",
+    },
 ]
 
 
@@ -76,6 +91,38 @@ def _make_fake_model():
     return ToolCapableFakeModel(responses=responses)
 
 
+async def run_test_chatmodel():
+
+    from databricks_langchain import ChatDatabricks
+    from deepagents import create_deep_agent
+
+    model = ChatDatabricks(
+        model="databricks-gpt-oss-120b",
+        temperature=0,
+        use_responses_api=False,
+    )
+    model.profile = {
+        "max_input_tokens": 200000,
+        "max_output_tokens": 10000,
+        "text_inputs": True,
+        "tool_choice": True,
+        "tool_calling": True,
+        "structured_output": True,
+        "text_outputs": True,
+    }
+    agent = create_deep_agent(model=model, tools=[])
+    # async for c in model.astream("hello"):
+    #     print(c)
+    async for chunk in agent.astream(
+        input={"messages": [HumanMessage(content="今日の日付を教えてください")]},
+        config={"configurable": {"thread_id": "test-chatmodel-001"}},
+        stream_mode=["updates", "messages"],
+        subgraphs=True,
+        version="v2",
+    ):
+        print(f"Chunk: {chunk}")
+
+
 async def run_test_case(
     name: str,
     message: str,
@@ -86,16 +133,19 @@ async def run_test_case(
     total: int = 0,
 ) -> None:
     """単一テストケースを実行して結果を表示する."""
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"=== [{case_index}/{total}] {name} ===")
     print(f"メッセージ: {message}")
     print("-" * 50)
 
     user_workspace_client = get_user_workspace_client()
     default_model = next(k for k, v in load_models_config().items() if v.get("default"))
+    # default_model = "databricks-qwen3-next-80b-a3b-instruct"
     model = init_model(default_model, user_workspace_client)
     if override_model:
-        print(f"*** モデルを {override_model.__class__.__name__} にオーバーライドして実行 ***")
+        print(
+            f"*** モデルを {override_model.__class__.__name__} にオーバーライドして実行 ***"
+        )
         model = override_model
 
     agent = await init_agent(
@@ -106,7 +156,10 @@ async def run_test_case(
         override_subagent_model=override_model,
     )
 
-    messages = {"messages": [HumanMessage(content=message)]}
+    messages = {
+        "messages": [HumanMessage(content=message)],
+        "files": _load_preset_files(),
+    }
     config = {"configurable": {"thread_id": thread_id}}
 
     usage_accumulator: dict[str, int] = {
@@ -130,8 +183,8 @@ async def run_test_case(
         usage_accumulator=usage_accumulator,
     ):
         etype = event.type
-        print(f"[イベント] {etype}")
-        print(f"イベント内容: {event}")
+        # print(f"[イベント] {etype}")
+        # print(f"イベント内容: {event}")
 
         # テキストデルタを収集
         if etype == "response.output_text.delta":
@@ -171,16 +224,22 @@ async def run_test_case(
     out = usage_accumulator.get("output_tokens", 0)
     total_tokens = usage_accumulator.get("total_tokens", 0)
     if total_tokens > 0:
-        print(f"\n[使用トークン]")
+        print("\n[使用トークン]")
         print(f"input: {inp} / output: {out} / total: {total_tokens}")
 
     print("=" * 50)
 
 
 async def main() -> None:
+
+    # await run_test_chatmodel()
+    # return
+
     if not VOLUME_PATH:
         print("エラー: TEST_VOLUME_PATH 環境変数が設定されていません。")
-        print("例: TEST_VOLUME_PATH=/Volumes/catalog/schema/volume uv run python scripts/test_agent.py")
+        print(
+            "例: TEST_VOLUME_PATH=/Volumes/catalog/schema/volume uv run python scripts/test_agent.py"
+        )
         sys.exit(1)
 
     override_model = _make_fake_model() if USE_FAKE_MODEL else None
