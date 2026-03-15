@@ -6,9 +6,10 @@ A multi-agent chat application running on Databricks, built with [apx](https://d
 
 ## Features
 
-- **Multi-agent orchestration**: Web research agent and report generation agent work in tandem
+- **Multi-agent orchestration**: Web research, content writing, and report generation agents work in tandem
 - **Multiple LLM models**: Choose from 5 available models
-- **Automatic report generation**: Transforms web research results into polished HTML reports
+- **Content writing & translation**: Write original articles or translate web content into Qiita-formatted Markdown
+- **Automatic report generation**: Transforms research results into polished HTML reports
 - **Databricks UC Volume integration**: Saves research results and reports to Databricks storage
 - **Chat history management**: Save and browse past conversations
 - **MLflow integration**: Agent trace recording and experiment management
@@ -28,7 +29,44 @@ A multi-agent chat application running on Databricks, built with [apx](https://d
 | Agent | Role |
 |-------|------|
 | `web_researcher` | Performs web search and research, saves results as Markdown to UC Volume |
+| `content_writer` | Handles URL translation and original article writing, saves output as Qiita-formatted Markdown |
 | `final_report_creator` | Transforms Markdown drafts into polished final HTML reports |
+
+## Quickstart: GitHub → Databricks Apps
+
+### Step 1: Prerequisites
+
+- Access to a Databricks Workspace with Model Serving endpoints
+- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/databricks-cli.html) installed and authenticated (`databricks auth login`)
+- [apx CLI](https://github.com/databricks-solutions/apx) installed
+- Python 3.11+, [uv](https://docs.astral.sh/uv/), and [bun](https://bun.sh/) installed
+
+### Step 2: Clone the repository
+
+```bash
+git clone https://github.com/isanakamishiro/databricks-apx-deepagent-chat.git
+cd apx-deepagent-chat
+```
+
+### Step 3: Create UC Volumes and MLflow experiment
+
+Create two UC Volumes (one for data storage, one for MLflow tracking) and an MLflow experiment in your Databricks Workspace. Note the experiment ID.
+
+### Step 4: Set bundle variables
+
+```bash
+export BUNDLE_VAR_experiment_id=<mlflow-experiment-id>
+export BUNDLE_VAR_volume_full_name=<catalog>.<schema>.<volume>
+export BUNDLE_VAR_mlflow_tracking_volume_full_name=<catalog>.<schema>.<mlflow-volume>
+```
+
+### Step 5: Deploy
+
+```bash
+databricks bundle deploy -p <your-profile>
+```
+
+---
 
 ## Prerequisites
 
@@ -42,14 +80,13 @@ A multi-agent chat application running on Databricks, built with [apx](https://d
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/apx-deepagent-chat.git
+git clone https://github.com/isanakamishiro/databricks-apx-deepagent-chat.git
 cd apx-deepagent-chat
 
-# Install dependencies
+# Install Python dependencies
 uv sync
-cd src/apx_deepagent_chat/ui && bun install && cd -
 
-# Start the development server
+# Start the development server (automatically installs frontend dependencies)
 apx dev start
 ```
 
@@ -139,15 +176,27 @@ apx-deepagent-chat/
 ├── src/apx_deepagent_chat/
 │   ├── backend/              # FastAPI backend
 │   │   ├── app.py            # FastAPI entrypoint
-│   │   ├── agent.py          # Agent logic & SSE streaming
-│   │   ├── core.py           # Dependency injection & config
+│   │   ├── agent/            # Agent logic & SSE streaming
+│   │   ├── core/             # Dependency injection & config
+│   │   ├── models.py         # Pydantic models
 │   │   └── routers/          # API routes
+│   │       ├── chat_history.py
+│   │       ├── files.py
+│   │       ├── system.py
+│   │       └── volumes.py
 │   ├── ui/                   # React frontend
 │   │   └── routes/           # Page components
 │   └── assets/               # Agent configuration
 │       ├── models.yaml        # Available LLM model definitions
 │       ├── subagents.yaml     # Sub-agent definitions
-│       └── system_prompt.md   # System prompt
+│       ├── system_prompt.md   # System prompt
+│       ├── mcp_settings.yaml  # MCP server configuration
+│       └── skills/           # Sub-agent skill definitions
+│           └── sub/
+│               ├── web-researcher/
+│               ├── content-translator/
+│               ├── article-writer/
+│               └── final-report-creator/
 ├── databricks.yml            # Databricks deployment config
 └── pyproject.toml            # Python project config
 ```
