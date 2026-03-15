@@ -29,7 +29,7 @@ A multi-agent chat application running on Databricks, built with [apx](https://d
 
 ```bash
 git clone https://github.com/isanakamishiro/databricks-apx-deepagent-chat.git
-cd apx-deepagent-chat
+cd databricks-apx-deepagent-chat
 ```
 
 ### Step 3: Create UC Volumes and MLflow experiment
@@ -44,10 +44,11 @@ export BUNDLE_VAR_volume_full_name=<catalog>.<schema>.<volume>
 export BUNDLE_VAR_mlflow_tracking_volume_full_name=<catalog>.<schema>.<mlflow-volume>
 ```
 
-### Step 5: Deploy
+### Step 5: Build & Deploy
 
 ```bash
-databricks bundle deploy -p <your-profile>
+apx build
+databricks apps deploy -p <your-profile>
 ```
 
 ---
@@ -177,7 +178,7 @@ uv run pytest -m integration
 apx build
 
 # Deploy to Databricks
-databricks bundle deploy -p <your-profile>
+databricks apps deploy -p <your-profile>
 ```
 
 ### Deployment Variables
@@ -210,10 +211,6 @@ apx-deepagent-chat/
 │   │   ├── core/             # Dependency injection & config
 │   │   ├── models.py         # Pydantic models
 │   │   └── routers/          # API routes
-│   │       ├── chat_history.py
-│   │       ├── files.py
-│   │       ├── system.py
-│   │       └── volumes.py
 │   ├── ui/                   # React frontend
 │   │   └── routes/           # Page components
 │   └── assets/               # Agent configuration
@@ -221,12 +218,7 @@ apx-deepagent-chat/
 │       ├── subagents.yaml     # Sub-agent definitions
 │       ├── system_prompt.md   # System prompt
 │       ├── mcp_settings.yaml  # MCP server configuration
-│       └── skills/           # Sub-agent skill definitions
-│           └── sub/
-│               ├── web-researcher/
-│               ├── content-translator/
-│               ├── article-writer/
-│               └── final-report-creator/
+│       └── skills/           # Agent skill definitions
 ├── databricks.yml            # Databricks deployment config
 └── pyproject.toml            # Python project config
 ```
