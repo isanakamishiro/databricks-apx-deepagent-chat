@@ -1,6 +1,6 @@
 ---
 name: final-report-creator
-description: Use this skill when you need to generate a polished HTML report from a Markdown draft, convert research findings into a presentation-ready document, or produce a final formatted report. Trigger on: "create an HTML report", "generate a final report", "turn this draft into a report", "make a polished document", "HTMLレポートを作って", "最終レポートを生成して", "ドラフトをレポートにして". Requires one or more Markdown file paths as input — not raw content.
+description: Use this skill when you need to generate a polished HTML report from a Markdown draft, convert research findings into a presentation-ready document, or produce a final formatted report. Trigger on "create an HTML report", "generate a final report", "turn this draft into a report", "make a polished document", "HTMLレポートを作って", "最終レポートを生成して", "ドラフトをレポートにして". Requires one or more Markdown file paths as input — not raw content.
 ---
 
 # Final Report Creator

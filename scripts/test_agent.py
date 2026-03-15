@@ -22,8 +22,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 
-from apx_deepagent_chat.backend.agent import init_agent, init_model, load_models_config
+from apx_deepagent_chat.backend.agent import init_agent, init_model
 from apx_deepagent_chat.backend.agent.clients import get_user_workspace_client
+from apx_deepagent_chat.backend.agent.core import _load_preset_files
+from apx_deepagent_chat.backend.agent.model import load_models_config
 from apx_deepagent_chat.backend.agent.stream import process_agent_astream_events
 
 # プロジェクトの src ディレクトリを Python パスに追加
@@ -39,10 +41,15 @@ VOLUME_PATH = os.getenv("TEST_VOLUME_PATH", "")
 
 TEST_CASES = [
     {
-        "name": "基本的な質問",
-        "message": "今日の日付を必ずサブエージェントを使って確認してください",
-        "thread_id": "test-001",
+        "name": "Skill実行",
+        "message": "Databricksについて調査して",
+        "thread_id": "test-000",
     },
+    # {
+    #     "name": "基本的な質問",
+    #     "message": "今日の日付を必ずサブエージェントを使って確認してください",
+    #     "thread_id": "test-001",
+    # },
     # {
     #     "name": "ツールを使うタスク",
     #     "message": "現在の東京の時刻を教えてください",
@@ -123,6 +130,7 @@ async def run_test_case(
 
     user_workspace_client = get_user_workspace_client()
     default_model = next(k for k, v in load_models_config().items() if v.get("default"))
+    # default_model = "databricks-qwen3-next-80b-a3b-instruct"
     model = init_model(default_model, user_workspace_client)
     if override_model:
         print(
@@ -138,7 +146,10 @@ async def run_test_case(
         override_subagent_model=override_model,
     )
 
-    messages = {"messages": [HumanMessage(content=message)]}
+    messages = {
+        "messages": [HumanMessage(content=message)],
+        "files": _load_preset_files(),
+    }
     config = {"configurable": {"thread_id": thread_id}}
 
     usage_accumulator: dict[str, int] = {
@@ -162,8 +173,8 @@ async def run_test_case(
         usage_accumulator=usage_accumulator,
     ):
         etype = event.type
-        print(f"[イベント] {etype}")
-        print(f"イベント内容: {event}")
+        # print(f"[イベント] {etype}")
+        # print(f"イベント内容: {event}")
 
         # テキストデルタを収集
         if etype == "response.output_text.delta":

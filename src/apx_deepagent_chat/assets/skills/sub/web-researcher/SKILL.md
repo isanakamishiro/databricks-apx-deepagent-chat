@@ -1,6 +1,6 @@
 ---
 name: web-researcher
-description: Use this skill when you need to search the web for information, find information about a topic, look up something online, or gather research from the internet. Trigger on: "search the web for X", "find information about X", "look up X online", "research X", "gather data on X", "調べて", "ウェブで検索", "情報を集めて". Can be used standalone or as part of a larger research workflow.
+description: Use this skill when you need to search the web for information, find information about a topic, look up something online, or gather research from the internet. Trigger on "search the web for X", "find information about X", "look up X online", "research X", "gather data on X", "調べて", "ウェブで検索", "情報を集めて". Can be used standalone or as part of a larger research workflow.
 ---
 
 # Web Researcher
@@ -57,7 +57,7 @@ Example final response:
 Note: HTML report creation was not performed as it is outside the scope of this agent.
 
 ### Tool limits (strictly enforced)
-- `web_search`: maximum 3 calls — aim for 1–2
+- `web_search`: maximum 2 calls — aim for 1–2
 - `web_fetch`: maximum 3 calls — aim for 2–3
 - `get_current_time`: call once
 - `read_file`: maximum 2 calls (STEP 5, and STEP 5 retry only if verification fails)
@@ -96,12 +96,12 @@ Agent tool:
   description: |
     You are acting as web_researcher. Your job:
     1. Search the web for: [FOCUSED RESEARCH GOAL]
-    2. Collect findings from at least 3 reliable sources
+    2. Collect findings from at least 2 reliable sources
     3. Save all findings as a Markdown file at /research_results/YYYYMMDD_HHMMSS_{slug}.md
     4. Return the file path
 
     Available tools: web_search, web_fetch, get_current_time, write_file, read_file
-    Tool budgets: web_search ≤3 calls, web_fetch ≤3 calls
+    Tool budgets: web_search ≤2 calls, web_fetch ≤3 calls
 
     Your final response MUST contain the file path where results were saved.
 ```
@@ -135,7 +135,7 @@ The `web_researcher` subagent operates under strict tool limits:
 
 | Tool | Budget | Notes |
 |------|--------|-------|
-| `web_search` | ≤3 calls | Aim for 1–2; stop as soon as enough URLs found |
+| `web_search` | ≤2 calls | Aim for 1–2; stop as soon as enough URLs found |
 | `web_fetch` | ≤3 calls | Aim for 2–3; stop as soon as enough content gathered |
 | `get_current_time` | 1 call | Called first to timestamp the output file |
 | `write_file` | ≤2 calls | 1 write + 1 retry if verification fails |

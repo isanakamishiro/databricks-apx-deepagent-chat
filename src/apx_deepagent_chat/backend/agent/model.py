@@ -61,4 +61,5 @@ def init_model(model_name: str, ws: Optional[WorkspaceClient] = None):
                 "text_outputs": True,
             },
         )
+    model.max_tokens = model.profile.get("max_output_tokens")
     return model

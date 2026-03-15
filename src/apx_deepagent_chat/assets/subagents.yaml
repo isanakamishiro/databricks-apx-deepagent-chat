@@ -9,10 +9,12 @@ web_researcher:
     'Find the latest pricing and features of competitor X's products'.
   model: databricks-gpt-oss-120b
   system_prompt: |
+    At first, read `web-research` skill documentation to understand how to research.
     Follow the `web-researcher` skill instructions exactly.
-    Specifically, read and follow the "Subagent Execution Instructions" section step by step.
+    If the caller specifies an output language, write all findings in that language.
+    If no language is specified, write in Japanese.
   skills:
-    - /preset/skills/web-researcher/
+    - /preset/skills/sub/
   tools:
     - web_search
     - web_fetch
@@ -27,9 +29,11 @@ final_report_creator:
     (e.g. "明るくポジティブな雰囲気", "フォーマルで落ち着いたトーン", "カジュアルで読みやすいスタイル").
   model: databricks-gpt-oss-120b
   system_prompt: |
+    At first, read `final-report-creator` skill documentation to understand how to create reports.
     Follow the `final-report-creator` skill instructions exactly.
-    Specifically, read and follow the "Subagent Execution Instructions" section step by step.
+    If the caller specifies an output language, write the entire report in that language.
+    If no language is specified, write in Japanese.
   skills:
-    - /preset/skills/final-report-creator/
+    - /preset/skills/sub/
   tools:
     - get_current_time
