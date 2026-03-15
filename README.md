@@ -2,6 +2,8 @@
 
 A multi-agent chat application running on Databricks, built with [apx](https://databricks-solutions.github.io/apx/). Provides LLM-powered web research and automatic HTML report generation.
 
+![APX DeepAgent Chat](screenshot.png)
+
 [日本語版はこちら](README.ja.md)
 
 ## Features
@@ -14,29 +16,11 @@ A multi-agent chat application running on Databricks, built with [apx](https://d
 - **Chat history management**: Save and browse past conversations
 - **MLflow integration**: Agent trace recording and experiment management
 
-## Architecture
-
-| Layer | Technology |
-|-------|------------|
-| Backend | Python + FastAPI |
-| Frontend | React 19 + TypeScript + shadcn/ui |
-| AI | Databricks Model Serving + LangChain + deepagents |
-| Storage | Databricks UC Volume |
-| Observability | MLflow (tracing & experiment tracking) |
-
-## Sub-agents
-
-| Agent | Role |
-|-------|------|
-| `web_researcher` | Performs web search and research, saves results as Markdown to UC Volume |
-| `content_writer` | Handles URL translation and original article writing, saves output as Qiita-formatted Markdown |
-| `final_report_creator` | Transforms Markdown drafts into polished final HTML reports |
-
 ## Quickstart: GitHub → Databricks Apps
 
 ### Step 1: Prerequisites
 
-- Access to a Databricks Workspace with Model Serving endpoints
+- Access to a Databricks Workspace with Databricks Apps enabled
 - [Databricks CLI](https://docs.databricks.com/dev-tools/cli/databricks-cli.html) installed and authenticated (`databricks auth login`)
 - [apx CLI](https://github.com/databricks-solutions/apx) installed
 - Python 3.11+, [uv](https://docs.astral.sh/uv/), and [bun](https://bun.sh/) installed
@@ -68,9 +52,55 @@ databricks bundle deploy -p <your-profile>
 
 ---
 
+## Architecture
+
+| Layer | Technology |
+|-------|------------|
+| Backend | Python + FastAPI |
+| Frontend | React 19 + TypeScript + shadcn/ui |
+| AI | Databricks Apps + LangChain + deepagents |
+| Storage | Databricks UC Volume |
+| Observability | MLflow (tracing & experiment tracking) |
+
+## Sub-agents
+
+| Agent | Role |
+|-------|------|
+| `web_researcher` | Performs web search and research, saves results as Markdown to UC Volume |
+| `content_writer` | Handles URL translation and original article writing, saves output as Qiita-formatted Markdown |
+| `final_report_creator` | Transforms Markdown drafts into polished final HTML reports |
+
+## Memory & Skill Extension
+
+You can customize agent behavior by placing files and directories in the UC Volume specified in the chat settings.
+
+### Agent Memory
+
+Place an `AGENTS.md` file in the root of the volume. Its contents are loaded as the agent's persistent memory at startup.
+
+```
+<volume>/
+└── AGENTS.md   # Agent memory — instructions, context, or persona
+```
+
+### Custom Skills
+
+Place skill files under a `skills/` directory in the volume root. All files in this directory are automatically loaded and made available to the agent.
+
+```
+<volume>/
+└── skills/
+    └── skill_a/
+        └── SKILL.md
+```
+
+This allows you to extend agent capabilities without modifying the application code.
+
+---
+
 ## Prerequisites
 
-- Databricks Workspace with access to Model Serving endpoints
+- Databricks Workspace with Databricks Apps enabled
 - [apx CLI](https://github.com/databricks-solutions/apx) installed
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
