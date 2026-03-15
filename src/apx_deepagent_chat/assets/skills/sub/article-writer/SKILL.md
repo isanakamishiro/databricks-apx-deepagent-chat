@@ -23,9 +23,28 @@ Validation checks:
 - File must exist and be readable
 - File must not be empty
 
-Use the read content (draft, notes, outline) as material for article creation in Step 2.
+Use the read content (draft, notes, outline) as material for article planning in Step 2.
 
-## Step 2: Write Article
+## Step 2: Plan Article Structure
+
+Based on the source material read in Step 1, plan the article structure using TodoWrite before writing:
+
+```
+write_todos([
+  { content: "Select article type (New Technology / Series Continuation)", status: "pending" },
+  { content: "Decide opening pattern (Humor catchphrase / Direct intro)", status: "pending" },
+  { content: "List section headings in order", status: "pending" },
+  { content: "Identify key code blocks and their filenames", status: "pending" },
+  { content: "Note which style elements to use (parenthetical humor, modesty expressions, etc.)", status: "pending" },
+  { content: "Write article body", status: "pending" },
+  { content: "Write まとめ section using 4-point set", status: "pending" },
+  { content: "Self-review against Common Mistakes checklist", status: "pending" },
+])
+```
+
+Work through each todo item in order, marking them complete as you go.
+
+## Step 3: Write Article
 
 ### Article Structure Templates
 

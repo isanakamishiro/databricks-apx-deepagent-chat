@@ -154,13 +154,13 @@ def _load_subagents(config_path) -> list:
     return subagents
 
 
-@functools.cache
+# @functools.cache
 def _load_system_prompt(prompt_path) -> str:
     """Load system prompt from file (cached)."""
     return prompt_path.read_text()
 
 
-@functools.cache
+# @functools.cache
 def _load_preset_files() -> dict[str, Any]:
     """assets/ ディレクトリのファイルデータをキャッシュして返す。"""
 
