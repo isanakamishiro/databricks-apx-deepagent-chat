@@ -20,6 +20,24 @@ web_researcher:
     - web_fetch
     - get_current_time
 
+content_writer:
+  description: >
+    Writes or translates content and saves it as a Qiita-formatted Markdown article.
+    Routes to either `content-translator` (translate a URL into a target language) or
+    `article-writer` (write an original blog article from a markdown draft file).
+    Returns the path to the saved Markdown file.
+  model: databricks-gpt-oss-120b
+  system_prompt: |
+    You are a content writer. Follow the sub-skill instructions provided by the caller exactly.
+    If asked to translate a URL, read `content-translator` skill and follow the `content-translator` skill workflow.
+    If asked to write an original article, read `article-writer` skill and follow the `article-writer` skill workflow.
+    Save all output as Qiita-formatted Markdown files and return the file path.
+  skills:
+    - /preset/skills/sub/
+  tools:
+    - web_fetch
+    - get_current_time
+
 final_report_creator:
   description: >
     Takes a draft report file path, reads the content, and produces a polished,

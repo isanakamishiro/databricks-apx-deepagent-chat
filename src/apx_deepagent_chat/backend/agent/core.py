@@ -112,7 +112,7 @@ def _get_or_create_thread_id(request: ResponsesAgentRequest) -> str:
     return str(uuid_utils.uuid7())
 
 
-# @functools.cache
+@functools.cache
 def _load_subagents(config_path) -> list:
     """Load subagent definitions from YAML and wire up tools (cached).
 
@@ -160,7 +160,7 @@ def _load_system_prompt(prompt_path) -> str:
     return prompt_path.read_text()
 
 
-# @functools.cache
+@functools.cache
 def _load_preset_files() -> dict[str, Any]:
     """assets/ ディレクトリのファイルデータをキャッシュして返す。"""
 
@@ -356,7 +356,9 @@ async def streaming(
                 "messages": [all_messages[-1]] if all_messages else [],
                 "files": _load_preset_files(),
             }
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {
+                "configurable": {"thread_id": thread_id, "model_name": model_name}
+            }
 
             usage_accumulator: dict[str, int] = {
                 "input_tokens": 0,

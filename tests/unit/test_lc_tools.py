@@ -1,4 +1,5 @@
 """lc_tools.py のユニットテスト."""
+
 from unittest.mock import MagicMock, patch
 
 from apx_deepagent_chat.backend.agent.lc_tools import (
@@ -7,14 +8,17 @@ from apx_deepagent_chat.backend.agent.lc_tools import (
     web_search,
 )
 
-
 # ─── web_search ───────────────────────────────────────────────────────────────
 
 
 def test_web_search_returns_formatted_results():
     """検索結果をマークダウン形式で返す."""
     fake_results = [
-        {"title": "記事タイトル", "href": "https://example.com", "body": "本文テキスト"},
+        {
+            "title": "記事タイトル",
+            "href": "https://example.com",
+            "body": "本文テキスト",
+        },
     ]
     with patch("ddgs.DDGS") as mock_ddgs_cls:
         mock_ddgs_cls.return_value.text.return_value = iter(fake_results)
