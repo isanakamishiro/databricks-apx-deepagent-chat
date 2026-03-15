@@ -29,6 +29,8 @@ from mlflow.types.responses_helpers import ResponseError
 
 from ..core._base import LifespanDependency
 from .clients import get_sp_workspace_client, get_user_workspace_client
+from .lc_tools import get_current_time, web_fetch, web_search
+from .mcp_tools import get_mcp_tools
 from .middleware import flatten_system_message, strip_content_block_ids
 from .model import (
     ASSETS_DIR,
@@ -38,8 +40,6 @@ from .model import (
     load_models_config,
 )
 from .stream import process_agent_astream_events
-from .lc_tools import get_current_time, web_fetch, web_search
-from .mcp_tools import get_mcp_tools
 from .uc_backend import UCVolumesBackend
 from .uc_checkpointer import UCBundleCheckpointer
 
@@ -112,7 +112,7 @@ def _get_or_create_thread_id(request: ResponsesAgentRequest) -> str:
     return str(uuid_utils.uuid7())
 
 
-@functools.cache
+# @functools.cache
 def _load_subagents(config_path) -> list:
     """Load subagent definitions from YAML and wire up tools (cached).
 
@@ -160,7 +160,7 @@ def _load_system_prompt(prompt_path) -> str:
     return prompt_path.read_text()
 
 
-@functools.cache
+# @functools.cache
 def _load_preset_files() -> dict[str, Any]:
     """assets/ ディレクトリのファイルデータをキャッシュして返す。"""
 

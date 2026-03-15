@@ -2,6 +2,7 @@ mcp_servers:
   system-ai:
     type: managed
     path: /api/2.0/mcp/functions/system/ai
-  tavily-mcp:
-    type: external
-    path: /api/2.0/mcp/external/tavily-mcp
+  # External MCPの例
+  # tavily-mcp:
+  #   type: external
+  #   path: /api/2.0/mcp/external/tavily-mcp

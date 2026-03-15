@@ -14,24 +14,22 @@
 """
 
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
 
-# プロジェクトの src ディレクトリを Python パスに追加
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).parent.parent / ".env")
-
 from langchain_core.messages import HumanMessage
 
 from apx_deepagent_chat.backend.agent import init_agent, init_model, load_models_config
-from apx_deepagent_chat.backend.agent.stream import process_agent_astream_events
 from apx_deepagent_chat.backend.agent.clients import get_user_workspace_client
+from apx_deepagent_chat.backend.agent.stream import process_agent_astream_events
 
-import logging
+# プロジェクトの src ディレクトリを Python パスに追加
+# sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
 # --- 設定 ---
@@ -76,6 +74,38 @@ def _make_fake_model():
     return ToolCapableFakeModel(responses=responses)
 
 
+async def run_test_chatmodel():
+
+    from databricks_langchain import ChatDatabricks
+    from deepagents import create_deep_agent
+
+    model = ChatDatabricks(
+        model="databricks-gpt-oss-120b",
+        temperature=0,
+        use_responses_api=False,
+    )
+    model.profile = {
+        "max_input_tokens": 200000,
+        "max_output_tokens": 10000,
+        "text_inputs": True,
+        "tool_choice": True,
+        "tool_calling": True,
+        "structured_output": True,
+        "text_outputs": True,
+    }
+    agent = create_deep_agent(model=model, tools=[])
+    # async for c in model.astream("hello"):
+    #     print(c)
+    async for chunk in agent.astream(
+        input={"messages": [HumanMessage(content="今日の日付を教えてください")]},
+        config={"configurable": {"thread_id": "test-chatmodel-001"}},
+        stream_mode=["updates", "messages"],
+        subgraphs=True,
+        version="v2",
+    ):
+        print(f"Chunk: {chunk}")
+
+
 async def run_test_case(
     name: str,
     message: str,
@@ -86,7 +116,7 @@ async def run_test_case(
     total: int = 0,
 ) -> None:
     """単一テストケースを実行して結果を表示する."""
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"=== [{case_index}/{total}] {name} ===")
     print(f"メッセージ: {message}")
     print("-" * 50)
@@ -95,7 +125,9 @@ async def run_test_case(
     default_model = next(k for k, v in load_models_config().items() if v.get("default"))
     model = init_model(default_model, user_workspace_client)
     if override_model:
-        print(f"*** モデルを {override_model.__class__.__name__} にオーバーライドして実行 ***")
+        print(
+            f"*** モデルを {override_model.__class__.__name__} にオーバーライドして実行 ***"
+        )
         model = override_model
 
     agent = await init_agent(
@@ -171,16 +203,22 @@ async def run_test_case(
     out = usage_accumulator.get("output_tokens", 0)
     total_tokens = usage_accumulator.get("total_tokens", 0)
     if total_tokens > 0:
-        print(f"\n[使用トークン]")
+        print("\n[使用トークン]")
         print(f"input: {inp} / output: {out} / total: {total_tokens}")
 
     print("=" * 50)
 
 
 async def main() -> None:
+
+    # await run_test_chatmodel()
+    # return
+
     if not VOLUME_PATH:
         print("エラー: TEST_VOLUME_PATH 環境変数が設定されていません。")
-        print("例: TEST_VOLUME_PATH=/Volumes/catalog/schema/volume uv run python scripts/test_agent.py")
+        print(
+            "例: TEST_VOLUME_PATH=/Volumes/catalog/schema/volume uv run python scripts/test_agent.py"
+        )
         sys.exit(1)
 
     override_model = _make_fake_model() if USE_FAKE_MODEL else None
