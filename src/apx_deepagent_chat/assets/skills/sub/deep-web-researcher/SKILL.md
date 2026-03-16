@@ -1,6 +1,6 @@
 ---
 name: deep-web-researcher
-description: Use this skill when you need to do in-depth web research on complex, multi-aspect topics that require multiple searches and sources. Trigger on comparative analysis, trend research across multiple dimensions, comprehensive topic investigation, or any goal that requires more than one search query. Examples: "Compare X vs Y across multiple dimensions", "Analyze trends in Z from multiple angles", "複数の競合製品を比較分析して", "多角的に調査して".
+description: Use this skill when you need to do in-depth web research on complex, multi-aspect topics that require multiple searches and sources. Trigger on comparative analysis, trend research across multiple dimensions, comprehensive topic investigation, or any goal that requires more than one search query. Examples- "Compare X vs Y across multiple dimensions", "Analyze trends in Z from multiple angles", "複数の競合製品を比較分析して", "多角的に調査して".
 ---
 
 # Deep Web Researcher
