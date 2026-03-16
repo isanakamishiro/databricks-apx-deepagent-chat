@@ -40,7 +40,6 @@ Create two UC Volumes (one for data storage, one for MLflow tracking) and an MLf
 
 ```bash
 export BUNDLE_VAR_experiment_id=<mlflow-experiment-id>
-export BUNDLE_VAR_volume_full_name=<catalog>.<schema>.<volume>
 export BUNDLE_VAR_mlflow_tracking_volume_full_name=<catalog>.<schema>.<mlflow-volume>
 ```
 
@@ -188,14 +187,12 @@ The following variables are required in `databricks.yml`:
 | Variable | Description |
 |----------|-------------|
 | `experiment_id` | MLflow experiment ID |
-| `volume_full_name` | UC Volume for data storage (e.g. `workspace.default.my-volume`) |
 | `mlflow_tracking_volume_full_name` | UC Volume for MLflow trace storage |
 
 You can also set them as environment variables:
 
 ```bash
 export BUNDLE_VAR_experiment_id=<your-experiment-id>
-export BUNDLE_VAR_volume_full_name=<your-volume>
 export BUNDLE_VAR_mlflow_tracking_volume_full_name=<your-mlflow-volume>
 databricks bundle deploy -p <your-profile>
 ```
