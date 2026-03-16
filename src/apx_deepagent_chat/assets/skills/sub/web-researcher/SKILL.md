@@ -18,20 +18,18 @@ STEP 1 — Get current time
 Call `get_current_time` tool. Note the result.
 
 STEP 2 — Search the web
-Budget: 3 calls total. Before each call, state: "web_search call N/3".
+Budget: 1 call total. Before the call, state: "web_search call 1/1".
 Always pass `timelimit="y"` to restrict results to the past 1 year.
 Choose `region` based on the research topic:
   - Japanese topics (Japanese companies, domestic market, Japan-specific info): `region="jp-jp"`
   - US topics (US companies, US market, global English sources): `region="us-en"`
   - Other countries: use the appropriate region code (e.g. `region="uk-en"`, `region="de-de"`)
   - If the topic is global or region is unclear: omit `region` (use default)
-Stop calling as soon as you have enough URLs to proceed — earlier is better.
-If 1 search gives enough results, do not call again.
+You have exactly 1 search call — make it count with a well-crafted query.
 
 STEP 3 — Fetch pages
-Budget: 3 calls total. Before each call, state: "web_fetch call N/3".
-Fetch only the most promising URLs. Stop as soon as you have enough content to write the report.
-If 2–3 pages give enough information, do not fetch more.
+Budget: 1 call total. Before the call, state: "web_fetch call 1/1".
+Fetch only the single most promising URL from the search results.
 
 STEP 4 — Write the Markdown file
 Compile findings into a plain Markdown document.
@@ -57,8 +55,8 @@ Example final response:
 Note: HTML report creation was not performed as it is outside the scope of this agent.
 
 ### Tool limits (strictly enforced)
-- `web_search`: maximum 2 calls — aim for 1–2
-- `web_fetch`: maximum 3 calls — aim for 2–3
+- `web_search`: maximum 1 call — exactly 1, no more
+- `web_fetch`: maximum 1 call — exactly 1, no more
 - `get_current_time`: call once
 - `read_file`: maximum 2 calls (STEP 5, and STEP 5 retry only if verification fails)
 - `write_file`: maximum 2 calls (STEP 4, and STEP 5 retry only if verification fails)
@@ -101,7 +99,7 @@ Agent tool:
     4. Return the file path
 
     Available tools: web_search, web_fetch, get_current_time, write_file, read_file
-    Tool budgets: web_search ≤2 calls, web_fetch ≤3 calls
+    Tool budgets: web_search ≤1 call, web_fetch ≤1 call
 
     Your final response MUST contain the file path where results were saved.
 ```
@@ -135,8 +133,8 @@ The `web_researcher` subagent operates under strict tool limits:
 
 | Tool | Budget | Notes |
 |------|--------|-------|
-| `web_search` | ≤2 calls | Aim for 1–2; stop as soon as enough URLs found |
-| `web_fetch` | ≤3 calls | Aim for 2–3; stop as soon as enough content gathered |
+| `web_search` | 1 call | Exactly 1; craft a precise query to maximize results |
+| `web_fetch` | 1 call | Exactly 1; fetch the single most promising URL |
 | `get_current_time` | 1 call | Called first to timestamp the output file |
 | `write_file` | ≤2 calls | 1 write + 1 retry if verification fails |
 | `read_file` | ≤2 calls | Used only for file verification |
