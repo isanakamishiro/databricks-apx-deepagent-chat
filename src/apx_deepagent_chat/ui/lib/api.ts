@@ -81,6 +81,9 @@ export interface VersionOut {
 export interface VolumeOut {
     name: string;
 }
+export interface VolumeValidateOut {
+    exists: boolean;
+}
 export const agent_info_endpoint_agent_info_get = async (options?: RequestInit): Promise<{
     data: Record<string, unknown>;
 }> =>{
@@ -1445,6 +1448,99 @@ export function useListSchemasSuspense<TData = {
     return useSuspenseQuery({
         queryKey: listSchemasKey(options.params),
         queryFn: ()=>listSchemas(options.params),
+        ...options?.query
+    });
+}
+export interface ValidateVolumeParams {
+    catalog: string;
+    schema: string;
+    volume: string;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const validateVolume = async (params: ValidateVolumeParams, options?: RequestInit): Promise<{
+    data: VolumeValidateOut;
+}> =>{
+    const searchParams = new URLSearchParams();
+    if (params.catalog != null) searchParams.set("catalog", String(params.catalog));
+    if (params.schema != null) searchParams.set("schema", String(params.schema));
+    if (params.volume != null) searchParams.set("volume", String(params.volume));
+    const queryString = searchParams.toString();
+    const url = queryString ? `/api/volumes/validate?${queryString}` : "/api/volumes/validate";
+    const res = await fetch(url, {
+        ...options,
+        method: "GET",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export const validateVolumeKey = (params?: ValidateVolumeParams)=>{
+    return [
+        "/api/volumes/validate",
+        params
+    ] as const;
+};
+export function useValidateVolume<TData = {
+    data: VolumeValidateOut;
+}>(options: {
+    params: ValidateVolumeParams;
+    query?: Omit<UseQueryOptions<{
+        data: VolumeValidateOut;
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useQuery({
+        queryKey: validateVolumeKey(options.params),
+        queryFn: ()=>validateVolume(options.params),
+        ...options?.query
+    });
+}
+export function useValidateVolumeSuspense<TData = {
+    data: VolumeValidateOut;
+}>(options: {
+    params: ValidateVolumeParams;
+    query?: Omit<UseSuspenseQueryOptions<{
+        data: VolumeValidateOut;
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useSuspenseQuery({
+        queryKey: validateVolumeKey(options.params),
+        queryFn: ()=>validateVolume(options.params),
         ...options?.query
     });
 }

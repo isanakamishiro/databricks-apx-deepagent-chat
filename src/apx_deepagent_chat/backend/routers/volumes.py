@@ -40,6 +40,28 @@ async def list_schemas(
         raise HTTPException(status_code=403, detail=str(e)) from e
 
 
+class VolumeValidateOut(BaseModel):
+    exists: bool
+
+
+@router.get("/volumes/validate", operation_id="validateVolume", response_model=VolumeValidateOut)
+async def validate_volume(
+    ws: Dependencies.UserClient,
+    catalog: str = Query(...),
+    schema: str = Query(...),
+    volume: str = Query(...),
+) -> VolumeValidateOut:
+    """ボリュームパスのルートを ls して存在確認する."""
+    path = f"/Volumes/{catalog}/{schema}/{volume}"
+    try:
+        next(iter(ws.files.list_directory_contents(path)), None)
+        return VolumeValidateOut(exists=True)
+    except NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except PermissionDenied as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+
+
 @router.get("/volumes/volumes", operation_id="listVolumes", response_model=list[VolumeOut])
 async def list_volumes(
     ws: Dependencies.UserClient,

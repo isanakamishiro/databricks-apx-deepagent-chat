@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight, ChevronDown, Database, Folder, FolderOpen, HardDrive } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
@@ -33,21 +34,30 @@ type VolumeExplorerProps = {
   onSelect: (path: string) => void;
 };
 
-function parsePath(path: string): { catalog: string; schema: string } | null {
-  const m = path.match(/^\/Volumes\/([^/]+)\/([^/]+)\/[^/]+$/);
+function parsePath(path: string): { catalog: string; schema: string; volume: string } | null {
+  const m = path.match(/^\/Volumes\/([^/]+)\/([^/]+)\/([^/]+)$/);
   if (!m) return null;
-  return { catalog: m[1], schema: m[2] };
+  return { catalog: m[1], schema: m[2], volume: m[3] };
 }
 
 export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
   const [open, setOpen] = useState(false);
-  const [pendingPath, setPendingPath] = useState(value);
   const [openFolders, setOpenFolders] = useState<string[]>([]);
+
+  const [selectedCatalog, setSelectedCatalog] = useState<string | null>(null);
+  const [selectedSchema, setSelectedSchema] = useState<string | null>(null);
+  const [volumeName, setVolumeName] = useState('');
+  const [validateState, setValidateState] = useState<'idle' | 'validating' | 'error'>('idle');
+  const [validateError, setValidateError] = useState('');
 
   const [catalogs, setCatalogs] = useState<Entry[]>([]);
   const [catalogState, setCatalogState] = useState<LoadState>('idle');
   const [schemas, setSchemas] = useState<Record<string, { state: LoadState; data: Entry[] }>>({});
-  const [volumes, setVolumes] = useState<Record<string, { state: LoadState; data: Entry[] }>>({});
+
+  const pendingPath =
+    selectedCatalog && selectedSchema && volumeName.trim()
+      ? `/Volumes/${selectedCatalog}/${selectedSchema}/${volumeName.trim()}`
+      : '';
 
   const loadCatalogs = async () => {
     if (catalogState !== 'idle') return;
@@ -76,72 +86,51 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
     }
   };
 
-  const loadVolumes = async (catalog: string, schema: string) => {
-    const key = `${catalog}/${schema}`;
-    if (volumes[key]?.state === 'loaded' || volumes[key]?.state === 'loading') return;
-    setVolumes((p) => ({ ...p, [key]: { state: 'loading', data: [] } }));
-    try {
-      const res = await fetch(
-        `/api/volumes/volumes?catalog=${encodeURIComponent(catalog)}&schema=${encodeURIComponent(schema)}`
-      );
-      if (!res.ok) throw new Error('Failed');
-      const data: Entry[] = await res.json();
-      setVolumes((p) => ({ ...p, [key]: { state: 'loaded', data } }));
-    } catch {
-      setVolumes((p) => ({ ...p, [key]: { state: 'error', data: [] } }));
-    }
-  };
-
-  const renderVolumeItems = (cat: Entry, sc: Entry) => {
-    const key = `${cat.name}/${sc.name}`;
-    const vs = volumes[key];
-    if (vs?.state === 'loading')
-      return (
-        <div className="space-y-1 py-1">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-3/4" />
-        </div>
-      );
-    if (vs?.state === 'error')
-      return <p className="text-destructive py-1 text-xs">取得に失敗しました</p>;
-    if (vs?.state === 'loaded' && vs.data.length === 0)
-      return (
-        <p className="text-muted-foreground py-1 text-xs">ボリュームがありません</p>
-      );
-    return vs?.data.map((vol) => {
-      const path = `/Volumes/${cat.name}/${sc.name}/${vol.name}`;
-      const isSelected = pendingPath === path;
-      return (
-        <FileHighlight key={vol.name}>
-          <File
-            className={cn(
-              'flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 hover:bg-accent',
-              isSelected && 'bg-primary/10 font-medium text-primary'
-            )}
-            onClick={() => setPendingPath(path)}
-          >
-            <HardDrive size={13} />
-            <FileLabel>{vol.name}</FileLabel>
-            {isSelected && <span className="ml-auto text-xs">✓</span>}
-          </File>
-        </FileHighlight>
-      );
-    });
-  };
-
   const handleDialogOpen = async (isOpen: boolean) => {
     setOpen(isOpen);
     if (isOpen) {
-      setPendingPath(value);
-      await loadCatalogs();
       const parsed = parsePath(value);
+      setSelectedCatalog(parsed?.catalog ?? null);
+      setSelectedSchema(parsed?.schema ?? null);
+      setVolumeName(parsed?.volume ?? '');
+      setValidateState('idle');
+      setValidateError('');
+      await loadCatalogs();
       if (parsed) {
         setOpenFolders([parsed.catalog, `${parsed.catalog}/${parsed.schema}`]);
         await loadSchemas(parsed.catalog);
-        await loadVolumes(parsed.catalog, parsed.schema);
       } else {
         setOpenFolders([]);
       }
+    }
+  };
+
+  const handleSelect = async () => {
+    if (!pendingPath) return;
+    setValidateState('validating');
+    try {
+      const url = `/api/volumes/validate?catalog=${encodeURIComponent(selectedCatalog!)}&schema=${encodeURIComponent(selectedSchema!)}&volume=${encodeURIComponent(volumeName.trim())}`;
+      const res = await fetch(url);
+      if (res.status === 404) {
+        setValidateState('error');
+        setValidateError('ボリュームが見つかりません。名前を確認してください。');
+        return;
+      }
+      if (res.status === 403) {
+        setValidateState('error');
+        setValidateError('このボリュームへのアクセス権限がありません。');
+        return;
+      }
+      if (!res.ok) {
+        setValidateState('error');
+        setValidateError('ボリュームの確認中にエラーが発生しました。');
+        return;
+      }
+      onSelect(pendingPath);
+      setOpen(false);
+    } catch {
+      setValidateState('error');
+      setValidateError('ネットワークエラーが発生しました。');
     }
   };
 
@@ -213,24 +202,30 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
                         <p className="text-muted-foreground py-1 text-xs">スキーマがありません</p>
                       )}
                       {schemas[cat.name]?.state === 'loaded' &&
-                        schemas[cat.name].data.map((sc) => (
-                          <FolderItem key={sc.name} value={`${cat.name}/${sc.name}`}>
-                            <FolderHeader onClick={() => loadVolumes(cat.name, sc.name)}>
-                              <FolderTrigger
-                                className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left hover:bg-accent"
+                        schemas[cat.name].data.map((sc) => {
+                          const isSelected = selectedCatalog === cat.name && selectedSchema === sc.name;
+                          return (
+                            <FileHighlight key={sc.name}>
+                              <File
+                                className={cn(
+                                  'flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 hover:bg-accent',
+                                  isSelected && 'bg-primary/10 font-medium text-primary'
+                                )}
+                                onClick={() => {
+                                  setSelectedCatalog(cat.name);
+                                  setSelectedSchema(sc.name);
+                                  setVolumeName('');
+                                  setValidateState('idle');
+                                  setValidateError('');
+                                }}
                               >
-                                <FolderIcon
-                                  closeIcon={<ChevronRight size={12} />}
-                                  openIcon={<ChevronDown size={12} />}
-                                />
-                                <FolderLabel>{sc.name}</FolderLabel>
-                              </FolderTrigger>
-                            </FolderHeader>
-                            <FolderPanel className="ml-5 border-l pl-2">
-                              {renderVolumeItems(cat, sc)}
-                            </FolderPanel>
-                          </FolderItem>
-                        ))}
+                                <Database size={13} />
+                                <FileLabel>{sc.name}</FileLabel>
+                                {isSelected && <span className="ml-auto text-xs">✓</span>}
+                              </File>
+                            </FileHighlight>
+                          );
+                        })}
                     </FolderPanel>
                   </FolderItem>
                 ))}
@@ -239,8 +234,32 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
             )}
           </div>
 
+          {selectedCatalog && selectedSchema && (
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">
+                ボリューム名
+              </label>
+              <div className="flex items-center gap-1.5">
+                <HardDrive size={13} className="text-muted-foreground shrink-0" />
+                <Input
+                  className="h-7 text-xs"
+                  placeholder="volume_name"
+                  value={volumeName}
+                  onChange={(e) => {
+                    setVolumeName(e.target.value);
+                    setValidateState('idle');
+                    setValidateError('');
+                  }}
+                />
+              </div>
+              {validateState === 'error' && (
+                <p className="text-destructive text-xs">{validateError}</p>
+              )}
+            </div>
+          )}
+
           {pendingPath && (
-            <p className="truncate text-xs text-green-600">📍 {pendingPath}</p>
+            <p className="truncate text-xs text-foreground/70">📍 {pendingPath}</p>
           )}
 
           <DialogFooter className="flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -264,13 +283,10 @@ export function VolumeExplorer({ value, onSelect }: VolumeExplorerProps) {
                 キャンセル
               </Button>
               <Button
-                onClick={() => {
-                  onSelect(pendingPath);
-                  setOpen(false);
-                }}
-                disabled={!pendingPath}
+                onClick={handleSelect}
+                disabled={!pendingPath || validateState === 'validating'}
               >
-                選択
+                {validateState === 'validating' ? '確認中...' : '選択'}
               </Button>
             </div>
           </DialogFooter>

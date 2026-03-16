@@ -67,3 +67,31 @@ def test_list_volumes_not_found(client, mock_ws):
 def test_list_volumes_missing_schema_param(client):
     response = client.get("/api/volumes/volumes", params={"catalog": "cat"})
     assert response.status_code == 422
+
+
+def test_validate_volume_success(client, mock_ws):
+    mock_ws.files.list_directory_contents.return_value = iter([])
+    response = client.get(
+        "/api/volumes/validate",
+        params={"catalog": "cat", "schema": "sch", "volume": "vol"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"exists": True}
+
+
+def test_validate_volume_not_found(client, mock_ws):
+    mock_ws.files.list_directory_contents.side_effect = NotFound("not found")
+    response = client.get(
+        "/api/volumes/validate",
+        params={"catalog": "cat", "schema": "sch", "volume": "missing"},
+    )
+    assert response.status_code == 404
+
+
+def test_validate_volume_permission_denied(client, mock_ws):
+    mock_ws.files.list_directory_contents.side_effect = PermissionDenied("denied")
+    response = client.get(
+        "/api/volumes/validate",
+        params={"catalog": "cat", "schema": "sch", "volume": "vol"},
+    )
+    assert response.status_code == 403
