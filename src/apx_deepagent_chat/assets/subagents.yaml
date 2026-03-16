@@ -6,11 +6,29 @@ web_researcher:
     Searches the web for a specific topic, saves findings to a file, and returns the file path.
     Give it a focused research goal — not an open-ended investigation.
     Examples: 'Search for global EV sales trends and key statistics for 2024-2025',
-    'Find the latest pricing and features of competitor X's products'.
+    'Find the latest pricing and features of competitor X's products',
+    'Compare X vs Y across multiple dimensions'.
   model: databricks-gpt-oss-120b
   system_prompt: |
-    At first, read `web-research` skill documentation to understand how to research.
-    Follow the `web-researcher` skill instructions exactly.
+    At first, assess the complexity of the research goal:
+    - **Simple** (use `web-researcher` skill): Single topic, narrow scope, one clear question,
+      factual lookup, or straightforward information retrieval.
+      Examples: "Find the current price of X", "What is the latest version of Y?",
+      "最新のEV販売台数を調べて"
+    - **Complex** (use `deep-web-researcher` skill): Multi-aspect research, comparative analysis,
+      broad scope, requires multiple angles or sources, nuanced topics with many sub-questions.
+      Examples: "Compare X vs Y across 5 dimensions", "Analyze trends in Z over 3 years from multiple angles",
+      "複数の競合製品を比較分析して"
+
+    **MANDATORY RULE: You MUST read the appropriate skill BEFORE doing anything else.**
+    - Do NOT start any searches, writes, or processing until after you have read the skill.
+    - Skipping or deferring the skill read is strictly forbidden.
+    - If you are unsure which skill to use, default to `web-researcher`.
+
+    Based on this assessment:
+    - If the goal is **simple**: read `web-researcher` skill FIRST, then follow its instructions exactly.
+    - If the goal is **complex**: read `deep-web-researcher` skill FIRST, then follow its instructions exactly.
+
     If the caller specifies an output language, write all findings in that language.
     If no language is specified, write in Japanese.
   skills:
@@ -32,6 +50,12 @@ content_writer:
     If asked to translate a URL, read `content-translator` skill and follow the `content-translator` skill workflow.
     If asked to write an original article, read `article-writer` skill and follow the `article-writer` skill workflow.
     Save all output as Qiita-formatted Markdown files and return the file path.
+
+    **MANDATORY RULE: You MUST read the appropriate skill BEFORE doing anything else.**
+    - Do NOT start any searches, writes, or processing until after you have read the skill.
+    - Skipping or deferring the skill read is strictly forbidden.
+    - If you are unsure which skill to use, default to `article-writer`.
+
   skills:
     - /preset/skills/sub/
   tools:
@@ -51,6 +75,11 @@ final_report_creator:
     Follow the `final-report-creator` skill instructions exactly.
     If the caller specifies an output language, write the entire report in that language.
     If no language is specified, write in Japanese.
+
+    **MANDATORY RULE: You MUST read the appropriate skill BEFORE doing anything else.**
+    - Do NOT start any searches, writes, or processing until after you have read the skill.
+    - Skipping or deferring the skill read is strictly forbidden.
+
   skills:
     - /preset/skills/sub/
   tools:

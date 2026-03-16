@@ -155,7 +155,7 @@ function Layout() {
 
   return (
     <>
-    <SidebarLayout defaultOpen={false} onLogoClick={handleNewChat}>
+    <SidebarLayout onLogoClick={handleNewChat}>
       <SidebarGroup>
         <SidebarGroupLabel className="flex items-center justify-between pr-1">
           <span>会話履歴</span>

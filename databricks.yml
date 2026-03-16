@@ -25,6 +25,7 @@ resources:
       user_api_scopes:
         - files.files
         - serving.serving-endpoints
+        - dashboards.genie
         - catalog.connections
         - catalog.catalogs:read
         - catalog.schemas:read

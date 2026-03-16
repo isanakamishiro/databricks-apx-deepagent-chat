@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from uuid import uuid4
 
+import mlflow
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from mlflow.genai.agent_server import (
@@ -39,6 +40,7 @@ _job_store = JobStore()
 
 # ─── 定期クリーンアップ ───────────────────────────────────────────────────────
 
+
 async def _periodic_cleanup(store: JobStore, interval: int = 60) -> None:
     """interval 秒ごとに完了ジョブをクリーンアップする."""
     while True:
@@ -48,25 +50,40 @@ async def _periodic_cleanup(store: JobStore, interval: int = 60) -> None:
 
 # ─── バックグラウンドエージェントタスク ──────────────────────────────────────
 
+
+# @mlflow.trace(name="run_agent", span_type="AGENT")
 async def _run_agent_background(job_id: str, body: dict) -> None:
     """エージェントをバックグラウンドで実行し、イベントを JobStore に蓄積する."""
+
     job = _job_store.get_job(job_id)
     if job is None:
         return
     job.status = "running"
     try:
-        agent_request = ResponsesAgentRequest(**body)
-        async for event in streaming(agent_request):
-            event_type = str(event.type) if hasattr(event, "type") else ""
-            data = event.model_dump(mode="json")
-            _job_store.append_event(job_id, event_type, data)
-        _job_store.mark_done(job_id)
+        with mlflow.start_span(name="run_agent", span_type="AGENT") as span:
+            # MLflow Tracing の span に入力内容をタグ付けする。タグは後から MLflow UI で検索やフィルタリングに使える。
+            input = body.get("input", [])
+            span_input = body
+            # Find the last human message
+            for message in reversed(input):
+                if message.get("role") == "user":
+                    span_input = message.get("content", "")
+                    break
+            span.set_inputs(span_input)
+
+            agent_request = ResponsesAgentRequest(**body)
+            async for event in streaming(agent_request):
+                event_type = str(event.type) if hasattr(event, "type") else ""
+                data = event.model_dump(mode="json")
+                _job_store.append_event(job_id, event_type, data)
+            _job_store.mark_done(job_id)
     except Exception:
         logger.exception("Background agent error for job %s", job_id)
         _job_store.mark_error(job_id, "Agent processing failed")
 
 
 # ─── SSE ジェネレータ ─────────────────────────────────────────────────────────
+
 
 async def _generate_sse(
     job_id: str, last_event_id: int, request: Request
@@ -116,11 +133,13 @@ async def _generate_sse(
 
 # ─── レスポンスモデル ─────────────────────────────────────────────────────────
 
+
 class ChatStartResponse(BaseModel):
     job_id: str
 
 
 # ─── アプリケーション生成 ─────────────────────────────────────────────────────
+
 
 def create_server_app() -> FastAPI:
     # AgentServer provides /invocations and /responses endpoints
@@ -154,7 +173,9 @@ def create_server_app() -> FastAPI:
     app.include_router(api_router)
 
     # ─── POST /api/chat/start ─────────────────────────────────────────────────
-    @app.post("/api/chat/start", operation_id="chatStart", response_model=ChatStartResponse)
+    @app.post(
+        "/api/chat/start", operation_id="chatStart", response_model=ChatStartResponse
+    )
     async def chat_start(
         request: Request,
         headers: Dependencies.Headers,
