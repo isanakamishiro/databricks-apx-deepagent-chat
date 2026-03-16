@@ -10,9 +10,9 @@ logger = logging.getLogger(__name__)
 
 # ─── Databricks クライアント依存注入 ─────────────────────────────────────────
 
-# Dependencies.UserClient で注入された WorkspaceClient を受け取る ContextVar
-_injected_user_ws_client: ContextVar[WorkspaceClient | None] = ContextVar(
-    "_injected_user_ws_client", default=None
+# OBOトークン文字列を保持する ContextVar（ストリーミング中も維持するためリセットしない）
+_current_obo_token: ContextVar[str | None] = ContextVar(
+    "_current_obo_token", default=None
 )
 
 # Dependencies.Client（SP）で注入された WorkspaceClient を受け取る ContextVar
@@ -22,19 +22,20 @@ _injected_sp_ws_client: ContextVar[WorkspaceClient | None] = ContextVar(
 
 
 def get_user_workspace_client() -> WorkspaceClient:
-    """ユーザー認証済み WorkspaceClient を返す（DI優先、フォールバックあり）.
+    """ユーザー認証済み WorkspaceClient を返す（毎回新規生成）.
 
-    FastAPI DI 経由で注入された場合はそれを返し、
-    mlflow ハンドラー経由の場合はリクエストヘッダーから生成する。
+    _current_obo_token から OBOトークンを読み取り、毎回新しい WorkspaceClient を生成する。
+    これによりストリーミングジェネレータ実行時も finally リセット後も正しいトークンが使われる。
+    フォールバック順: _current_obo_token → get_request_headers() → WorkspaceClient()
     """
-    injected = _injected_user_ws_client.get()
-    if injected is not None:
-        return injected
+    token = _current_obo_token.get()
+    if token:
+        return WorkspaceClient(token=token, auth_type="pat")
     # フォールバック: mlflow Context Var からヘッダー経由で生成
     token = get_request_headers().get("x-forwarded-access-token")
-    if not token:
-        return WorkspaceClient()
-    return WorkspaceClient(token=token, auth_type="pat")
+    if token:
+        return WorkspaceClient(token=token, auth_type="pat")
+    return WorkspaceClient()
 
 
 def get_sp_workspace_client() -> WorkspaceClient:

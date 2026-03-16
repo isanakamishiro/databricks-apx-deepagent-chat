@@ -206,13 +206,13 @@ def _build_subagents(
             # run_limit: 会話全体での最大実行回数（サブエージェントのYAML定義のbudgetと合わせること）
             ToolCallLimitMiddleware(
                 tool_name="web_search",
-                thread_limit=3,
-                run_limit=2,
+                thread_limit=5,
+                run_limit=1,
             ),
             ToolCallLimitMiddleware(
                 tool_name="web_fetch",
-                thread_limit=3,
-                run_limit=3,
+                thread_limit=10,
+                run_limit=1,
             ),
         ]
 

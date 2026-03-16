@@ -11,8 +11,8 @@ from mlflow.genai.agent_server import (
 
 from .._metadata import dist_dir
 from .agent import (  # also registers @invoke / @stream handlers
+    _current_obo_token,
     _injected_sp_ws_client,
-    _injected_user_ws_client,
 )
 from .core._base import LifespanDependency
 from .core._factory import _chain_dep_lifespans
@@ -66,16 +66,16 @@ def create_server_app() -> FastAPI:
         @app.post("/api/chat", operation_id="chat")
         async def chat_endpoint(
             request: Request,
-            user_client: Dependencies.UserClient,
+            headers: Dependencies.Headers,
             sp_client: Dependencies.Client,
         ):
-            tok_user = _injected_user_ws_client.set(user_client)
+            obo_token = headers.token.get_secret_value() if headers.token else None
+            _current_obo_token.set(obo_token)  # リセットしない（ストリーミング中も維持するため）
             tok_sp = _injected_sp_ws_client.set(sp_client)
             try:
                 return await _handler(request)
             finally:
-                _injected_user_ws_client.reset(tok_user)
-                _injected_sp_ws_client.reset(tok_sp)
+                _injected_sp_ws_client.reset(tok_sp)  # SPはリセット継続
 
     # Serve frontend static files
     if dist_dir.exists():
