@@ -207,12 +207,12 @@ def _build_subagents(
             ToolCallLimitMiddleware(
                 tool_name="web_search",
                 thread_limit=5,
-                run_limit=1,
+                run_limit=2,
             ),
             ToolCallLimitMiddleware(
                 tool_name="web_fetch",
                 thread_limit=10,
-                run_limit=1,
+                run_limit=3,
             ),
         ]
 

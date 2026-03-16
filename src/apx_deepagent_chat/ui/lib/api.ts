@@ -19,6 +19,9 @@ export interface Body_filesUpload {
 export interface CatalogOut {
     name: string;
 }
+export interface ChatStartResponse {
+    job_id: string;
+}
 export interface ComplexValue {
     display?: string | null;
     primary?: boolean | null;
@@ -134,68 +137,6 @@ export function useAgent_info_endpoint_agent_info_getSuspense<TData = {
         queryKey: agent_info_endpoint_agent_info_getKey(),
         queryFn: ()=>agent_info_endpoint_agent_info_get(),
         ...options?.query
-    });
-}
-export interface ChatParams {
-    "X-Forwarded-Host"?: string | null;
-    "X-Forwarded-Preferred-Username"?: string | null;
-    "X-Forwarded-User"?: string | null;
-    "X-Forwarded-Email"?: string | null;
-    "X-Request-Id"?: string | null;
-    "X-Forwarded-Access-Token"?: string | null;
-}
-export const chat = async (params?: ChatParams, options?: RequestInit): Promise<{
-    data: unknown;
-}> =>{
-    const res = await fetch("/api/chat", {
-        ...options,
-        method: "POST",
-        headers: {
-            ...(params?.["X-Forwarded-Host"] != null && {
-                "X-Forwarded-Host": params["X-Forwarded-Host"]
-            }),
-            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
-                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
-            }),
-            ...(params?.["X-Forwarded-User"] != null && {
-                "X-Forwarded-User": params["X-Forwarded-User"]
-            }),
-            ...(params?.["X-Forwarded-Email"] != null && {
-                "X-Forwarded-Email": params["X-Forwarded-Email"]
-            }),
-            ...(params?.["X-Request-Id"] != null && {
-                "X-Request-Id": params["X-Request-Id"]
-            }),
-            ...(params?.["X-Forwarded-Access-Token"] != null && {
-                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
-            }),
-            ...options?.headers
-        }
-    });
-    if (!res.ok) {
-        const body = await res.text();
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(body);
-        } catch  {
-            parsed = body;
-        }
-        throw new ApiError(res.status, res.statusText, parsed);
-    }
-    return {
-        data: await res.json()
-    };
-};
-export function useChat(options?: {
-    mutation?: UseMutationOptions<{
-        data: unknown;
-    }, ApiError, {
-        params: ChatParams;
-    }>;
-}) {
-    return useMutation({
-        mutationFn: (vars)=>chat(vars.params),
-        ...options?.mutation
     });
 }
 export interface ListChatsParams {
@@ -692,6 +633,126 @@ export function useSaveMessages(options?: {
     return useMutation({
         mutationFn: (vars)=>saveMessages(vars.params, vars.data),
         ...options?.mutation
+    });
+}
+export interface ChatStartParams {
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const chatStart = async (params?: ChatStartParams, options?: RequestInit): Promise<{
+    data: ChatStartResponse;
+}> =>{
+    const res = await fetch("/api/chat/start", {
+        ...options,
+        method: "POST",
+        headers: {
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export function useChatStart(options?: {
+    mutation?: UseMutationOptions<{
+        data: ChatStartResponse;
+    }, ApiError, {
+        params: ChatStartParams;
+    }>;
+}) {
+    return useMutation({
+        mutationFn: (vars)=>chatStart(vars.params),
+        ...options?.mutation
+    });
+}
+export interface Chat_stream_api_chat_stream__job_id__getParams {
+    job_id: string;
+}
+export const chat_stream_api_chat_stream__job_id__get = async (params: Chat_stream_api_chat_stream__job_id__getParams, options?: RequestInit): Promise<{
+    data: unknown;
+}> =>{
+    const res = await fetch(`/api/chat/stream/${params.job_id}`, {
+        ...options,
+        method: "GET"
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export const chat_stream_api_chat_stream__job_id__getKey = (params?: Chat_stream_api_chat_stream__job_id__getParams)=>{
+    return [
+        "/api/chat/stream/{job_id}",
+        params
+    ] as const;
+};
+export function useChat_stream_api_chat_stream__job_id__get<TData = {
+    data: unknown;
+}>(options: {
+    params: Chat_stream_api_chat_stream__job_id__getParams;
+    query?: Omit<UseQueryOptions<{
+        data: unknown;
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useQuery({
+        queryKey: chat_stream_api_chat_stream__job_id__getKey(options.params),
+        queryFn: ()=>chat_stream_api_chat_stream__job_id__get(options.params),
+        ...options?.query
+    });
+}
+export function useChat_stream_api_chat_stream__job_id__getSuspense<TData = {
+    data: unknown;
+}>(options: {
+    params: Chat_stream_api_chat_stream__job_id__getParams;
+    query?: Omit<UseSuspenseQueryOptions<{
+        data: unknown;
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useSuspenseQuery({
+        queryKey: chat_stream_api_chat_stream__job_id__getKey(options.params),
+        queryFn: ()=>chat_stream_api_chat_stream__job_id__get(options.params),
+        ...options?.query
     });
 }
 export const getConfig = async (options?: RequestInit): Promise<{

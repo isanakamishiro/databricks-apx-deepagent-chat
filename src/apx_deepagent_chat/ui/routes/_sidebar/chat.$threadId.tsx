@@ -309,7 +309,8 @@ function ChatPage() {
     setStreaming(true);
 
     try {
-      const response = await fetch("/api/chat", {
+      // Step 1: エージェント処理をバックグラウンドで開始し、job_id を取得
+      const startRes = await fetch("/api/chat/start", {
         method: "POST",
         signal: ctrl.signal,
         headers: {
@@ -327,254 +328,292 @@ function ChatPage() {
         }),
       });
 
-      if (!response.ok || !response.body) {
-        throw new Error(`Request failed: ${response.status}`);
+      if (!startRes.ok) {
+        throw new Error(`Failed to start job: ${startRes.status}`);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      const { job_id: jobId } = await startRes.json() as { job_id: string };
+
+      // Step 2: SSE で結果を受け取る（115秒ごとに自動再接続）
+      let lastEventId = -1;
       let streamCompleted = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      outerLoop: while (!streamCompleted) {
+        if (ctrl.signal.aborted) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        const reconnectCtrl = new AbortController();
+        const reconnectTimer = setTimeout(() => reconnectCtrl.abort(), 115_000);
+        const onParentAbort = () => reconnectCtrl.abort();
+        ctrl.signal.addEventListener("abort", onParentAbort, { once: true });
 
-        let eventType = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            eventType = line.slice(7).trim();
-          } else if (line.startsWith("data: ")) {
-            const dataStr = line.slice(6).trim();
-            if (!dataStr || dataStr === "[DONE]") continue;
-            try {
-              const data = JSON.parse(dataStr);
-              const resolvedType = eventType || data.type || "";
+        try {
+          const response = await fetch(`/api/chat/stream/${jobId}`, {
+            signal: reconnectCtrl.signal,
+            headers: lastEventId >= 0 ? { "Last-Event-ID": String(lastEventId) } : {},
+          });
 
-              if (
-                resolvedType === "response.output_text.delta" &&
-                typeof data.delta === "string"
-              ) {
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === "assistant") {
-                    updated[updated.length - 1] = {
-                      ...last,
-                      content: (last.content ?? "") + data.delta,
-                    };
-                  }
-                  return updated;
-                });
-              } else if (
-                resolvedType === "response.output_text.reasoning.delta" &&
-                typeof data.delta === "string"
-              ) {
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === "assistant") {
-                    updated[updated.length - 1] = {
-                      ...last,
-                      thinking: (last.thinking ?? "") + data.delta,
-                    };
-                  }
-                  return updated;
-                });
-              } else if (resolvedType === "subagent.start") {
-                const callId: string = data.call_id ?? "";
-                const agentType: string = data.name ?? "";
-                activeSubagentCallIdRef.current = callId;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === "assistant") {
-                    const blocks = (last.subAgentBlocks ?? []).map((b) =>
-                      b.callId === callId
-                        ? { ...b, agentType, state: "running" as const }
-                        : b
-                    );
-                    updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
-                  }
-                  return updated;
-                });
-              } else if (resolvedType === "subagent.end") {
-                const callId: string = data.call_id ?? "";
-                activeSubagentCallIdRef.current = null;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === "assistant") {
-                    const blocks = (last.subAgentBlocks ?? []).map((b) =>
-                      b.callId === callId
-                        ? { ...b, state: "done" as const }
-                        : b
-                    );
-                    updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
-                  }
-                  return updated;
-                });
-              } else if (resolvedType === "response.output_item.done") {
-                const item = data.item ?? {};
-                if (item.type === "function_call") {
-                  const activeCallId = activeSubagentCallIdRef.current;
-                  if (item.name === "task") {
-                    // task ツール → SubAgentBlock を作成（pending）
-                    const newSubAgent: SubAgentBlockData = {
-                      callId: item.call_id ?? item.id ?? "",
-                      agentType: "",
-                      toolCalls: [],
-                      state: "pending",
-                    };
+          if (!response.ok || !response.body) {
+            throw new Error(`Stream request failed: ${response.status}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+
+            let eventType = "";
+            for (const line of lines) {
+              if (line.startsWith("id: ")) {
+                const parsed = parseInt(line.slice(4).trim(), 10);
+                if (!isNaN(parsed)) lastEventId = parsed;
+              } else if (line.startsWith("event: ")) {
+                eventType = line.slice(7).trim();
+              } else if (line.startsWith("data: ")) {
+                const dataStr = line.slice(6).trim();
+                if (!dataStr || dataStr === "[DONE]") continue;
+                try {
+                  const data = JSON.parse(dataStr);
+                  const resolvedType = eventType || data.type || "";
+
+                  if (
+                    resolvedType === "response.output_text.delta" &&
+                    typeof data.delta === "string"
+                  ) {
                     setMessages((prev) => {
                       const updated = [...prev];
                       const last = updated[updated.length - 1];
                       if (last?.role === "assistant") {
                         updated[updated.length - 1] = {
                           ...last,
-                          subAgentBlocks: [
-                            ...(last.subAgentBlocks ?? []),
-                            newSubAgent,
-                          ],
+                          content: (last.content ?? "") + data.delta,
                         };
                       }
                       return updated;
                     });
-                  } else if (activeCallId) {
-                    // サブエージェント内のツール呼び出し → 該当 SubAgentBlock に追加
-                    const newTool = {
-                      callId: item.call_id ?? item.id ?? "",
-                      name: item.name ?? "",
-                      arguments: item.arguments ?? "",
-                      state: "input-available" as ToolCallState,
-                    };
-                    setMessages((prev) => {
-                      const updated = [...prev];
-                      const last = updated[updated.length - 1];
-                      if (last?.role === "assistant") {
-                        const blocks = (last.subAgentBlocks ?? []).map((b) =>
-                          b.callId === activeCallId
-                            ? { ...b, toolCalls: [...b.toolCalls, newTool] }
-                            : b
-                        );
-                        updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
-                      }
-                      return updated;
-                    });
-                  } else {
-                    // 通常のツール呼び出し
-                    const newBlock: ToolCallBlock = {
-                      callId: item.call_id ?? item.id ?? "",
-                      name: item.name ?? "",
-                      arguments: item.arguments ?? "",
-                      state: "input-available",
-                    };
+                  } else if (
+                    resolvedType === "response.output_text.reasoning.delta" &&
+                    typeof data.delta === "string"
+                  ) {
                     setMessages((prev) => {
                       const updated = [...prev];
                       const last = updated[updated.length - 1];
                       if (last?.role === "assistant") {
                         updated[updated.length - 1] = {
                           ...last,
-                          toolCallBlocks: [
-                            ...(last.toolCallBlocks ?? []),
-                            newBlock,
-                          ],
+                          thinking: (last.thinking ?? "") + data.delta,
                         };
                       }
                       return updated;
                     });
-                  }
-                } else if (item.type === "function_call_output") {
-                  const callId = item.call_id ?? "";
-                  const result = item.output ?? "";
-                  const activeCallId = activeSubagentCallIdRef.current;
-                  setMessages((prev) => {
-                    const updated = [...prev];
-                    const last = updated[updated.length - 1];
-                    if (last?.role === "assistant") {
-                      // サブエージェント内のツール結果
-                      if (activeCallId) {
+                  } else if (resolvedType === "subagent.start") {
+                    const callId: string = data.call_id ?? "";
+                    const agentType: string = data.name ?? "";
+                    activeSubagentCallIdRef.current = callId;
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      if (last?.role === "assistant") {
                         const blocks = (last.subAgentBlocks ?? []).map((b) =>
-                          b.callId === activeCallId
-                            ? {
-                                ...b,
-                                toolCalls: b.toolCalls.map((t) =>
-                                  t.callId === callId
-                                    ? { ...t, result, state: "output-available" as ToolCallState }
-                                    : t
-                                ),
-                              }
+                          b.callId === callId
+                            ? { ...b, agentType, state: "running" as const }
                             : b
                         );
                         updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
-                      } else {
-                        // task の完了結果か、通常ツールの結果かを判定
-                        const isSubagentResult = (last.subAgentBlocks ?? []).some(
-                          (b) => b.callId === callId
+                      }
+                      return updated;
+                    });
+                  } else if (resolvedType === "subagent.end") {
+                    const callId: string = data.call_id ?? "";
+                    activeSubagentCallIdRef.current = null;
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      if (last?.role === "assistant") {
+                        const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                          b.callId === callId
+                            ? { ...b, state: "done" as const }
+                            : b
                         );
-                        if (isSubagentResult) {
-                          // SubAgentBlock の result に保存
-                          const blocks = (last.subAgentBlocks ?? []).map((b) =>
-                            b.callId === callId ? { ...b, result } : b
-                          );
-                          updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
-                        } else {
-                          // 通常ツールの結果
-                          updated[updated.length - 1] = {
-                            ...last,
-                            toolCallBlocks: (last.toolCallBlocks ?? []).map((b) =>
-                              b.callId === callId
-                                ? { ...b, result, state: "output-available" as const }
+                        updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                      }
+                      return updated;
+                    });
+                  } else if (resolvedType === "response.output_item.done") {
+                    const item = data.item ?? {};
+                    if (item.type === "function_call") {
+                      const activeCallId = activeSubagentCallIdRef.current;
+                      if (item.name === "task") {
+                        // task ツール → SubAgentBlock を作成（pending）
+                        const newSubAgent: SubAgentBlockData = {
+                          callId: item.call_id ?? item.id ?? "",
+                          agentType: "",
+                          toolCalls: [],
+                          state: "pending",
+                        };
+                        setMessages((prev) => {
+                          const updated = [...prev];
+                          const last = updated[updated.length - 1];
+                          if (last?.role === "assistant") {
+                            updated[updated.length - 1] = {
+                              ...last,
+                              subAgentBlocks: [
+                                ...(last.subAgentBlocks ?? []),
+                                newSubAgent,
+                              ],
+                            };
+                          }
+                          return updated;
+                        });
+                      } else if (activeCallId) {
+                        // サブエージェント内のツール呼び出し → 該当 SubAgentBlock に追加
+                        const newTool = {
+                          callId: item.call_id ?? item.id ?? "",
+                          name: item.name ?? "",
+                          arguments: item.arguments ?? "",
+                          state: "input-available" as ToolCallState,
+                        };
+                        setMessages((prev) => {
+                          const updated = [...prev];
+                          const last = updated[updated.length - 1];
+                          if (last?.role === "assistant") {
+                            const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                              b.callId === activeCallId
+                                ? { ...b, toolCalls: [...b.toolCalls, newTool] }
                                 : b
-                            ),
-                          };
-                        }
+                            );
+                            updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                          }
+                          return updated;
+                        });
+                      } else {
+                        // 通常のツール呼び出し
+                        const newBlock: ToolCallBlock = {
+                          callId: item.call_id ?? item.id ?? "",
+                          name: item.name ?? "",
+                          arguments: item.arguments ?? "",
+                          state: "input-available",
+                        };
+                        setMessages((prev) => {
+                          const updated = [...prev];
+                          const last = updated[updated.length - 1];
+                          if (last?.role === "assistant") {
+                            updated[updated.length - 1] = {
+                              ...last,
+                              toolCallBlocks: [
+                                ...(last.toolCallBlocks ?? []),
+                                newBlock,
+                              ],
+                            };
+                          }
+                          return updated;
+                        });
                       }
+                    } else if (item.type === "function_call_output") {
+                      const callId = item.call_id ?? "";
+                      const result = item.output ?? "";
+                      const activeCallId = activeSubagentCallIdRef.current;
+                      setMessages((prev) => {
+                        const updated = [...prev];
+                        const last = updated[updated.length - 1];
+                        if (last?.role === "assistant") {
+                          // サブエージェント内のツール結果
+                          if (activeCallId) {
+                            const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                              b.callId === activeCallId
+                                ? {
+                                    ...b,
+                                    toolCalls: b.toolCalls.map((t) =>
+                                      t.callId === callId
+                                        ? { ...t, result, state: "output-available" as ToolCallState }
+                                        : t
+                                    ),
+                                  }
+                                : b
+                            );
+                            updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                          } else {
+                            // task の完了結果か、通常ツールの結果かを判定
+                            const isSubagentResult = (last.subAgentBlocks ?? []).some(
+                              (b) => b.callId === callId
+                            );
+                            if (isSubagentResult) {
+                              // SubAgentBlock の result に保存
+                              const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                                b.callId === callId ? { ...b, result } : b
+                              );
+                              updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                            } else {
+                              // 通常ツールの結果
+                              updated[updated.length - 1] = {
+                                ...last,
+                                toolCallBlocks: (last.toolCallBlocks ?? []).map((b) =>
+                                  b.callId === callId
+                                    ? { ...b, result, state: "output-available" as const }
+                                    : b
+                                ),
+                              };
+                            }
+                          }
+                        }
+                        return updated;
+                      });
                     }
-                    return updated;
-                  });
+                  } else if (resolvedType === "response.completed") {
+                    streamCompleted = true;
+                    const resp = data.response ?? {};
+                    const usage = resp.usage;
+                    const model = resp.model;
+                    const rawMax = resp.metadata?.max_input_tokens;
+                    const maxInputTokens = rawMax != null ? (Number.isFinite(Number(rawMax)) ? Number(rawMax) : undefined) : undefined;
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      if (last?.role === "assistant") {
+                        updated[updated.length - 1] = { ...last, usage, model, maxInputTokens };
+                      }
+                      return updated;
+                    });
+                  } else if (resolvedType === "error" && (data.error || data.message)) {
+                    streamCompleted = true; // エラーもストリーム終了として扱う
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      if (last?.role === "assistant") {
+                        updated[updated.length - 1] = {
+                          ...last,
+                          content: `Error: ${data.error ?? data.message}`,
+                          isError: true,
+                        };
+                      }
+                      return updated;
+                    });
+                  }
+                } catch {
+                  // ignore parse errors
                 }
-              } else if (resolvedType === "response.completed") {
-                streamCompleted = true;
-                const resp = data.response ?? {};
-                const usage = resp.usage;
-                const model = resp.model;
-                const rawMax = resp.metadata?.max_input_tokens;
-                const maxInputTokens = rawMax != null ? (Number.isFinite(Number(rawMax)) ? Number(rawMax) : undefined) : undefined;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === "assistant") {
-                    updated[updated.length - 1] = { ...last, usage, model, maxInputTokens };
-                  }
-                  return updated;
-                });
-              } else if (resolvedType === "error" && (data.error || data.message)) {
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === "assistant") {
-                    updated[updated.length - 1] = {
-                      ...last,
-                      content: `Error: ${data.error ?? data.message}`,
-                      isError: true,
-                    };
-                  }
-                  return updated;
-                });
               }
-            } catch {
-              // ignore parse errors
             }
           }
+        } catch (e) {
+          if (e instanceof Error && e.name === "AbortError") {
+            if (ctrl.signal.aborted) break outerLoop; // ユーザーが停止
+            continue outerLoop; // 115秒再接続
+          }
+          throw e;
+        } finally {
+          clearTimeout(reconnectTimer);
+          ctrl.signal.removeEventListener("abort", onParentAbort);
         }
       }
 
-      if (!streamCompleted) {
+      if (!streamCompleted && !ctrl.signal.aborted) {
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
