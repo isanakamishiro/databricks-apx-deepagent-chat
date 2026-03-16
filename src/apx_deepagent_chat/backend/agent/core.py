@@ -328,7 +328,7 @@ async def streaming(
         checkpointer = UCBundleCheckpointer(
             volume_path=volume_path,
             thread_id=thread_id,
-            workspace_client=get_sp_workspace_client(),
+            workspace_client=user_workspace_client,
         )
 
         async with checkpointer:
