@@ -8,6 +8,7 @@ from langchain_core.language_models.model_profile import ModelProfile
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from mlflow.types.responses import (
     ResponsesAgentStreamEvent,
+    create_reasoning_item,
     create_text_delta,
     create_text_output_item,
     output_to_responses_items_stream,
@@ -16,41 +17,85 @@ from mlflow.types.responses import (
 logger = logging.getLogger(__name__)
 
 
-# ─── テキスト抽出 ──────────────────────────────────────────────────────────────
+# ─── テキスト・Reasoning 抽出 ──────────────────────────────────────────────────
 
 
-def _extract_from_list(blocks: list) -> str:
-    """content ブロックのリストから text 部分のみを結合して返す."""
-    parts = []
-    for block in blocks:
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text", ""))
-    return "".join(parts)
+def _extract_text_and_reasoning(content) -> tuple[str, str]:
+    """AIMessage の content からテキストとreasoningを分離して返す.
 
-
-def _extract_text_content(content) -> str:
-    """AIMessage の content からテキスト部分のみを抽出する.
-
-    一部モデル (Gemini, GPT-oss) は content を JSON 配列の文字列で返す:
-      '[{"type": "text", "text": "...", "thoughtSignature": "..."}]'
-    この場合、"text" タイプのブロックの text フィールドのみを結合して返す。
-    通常の文字列や Python list の場合も適切に処理する。
+    Returns:
+        (text, reasoning) のタプル
     """
+    import re
+    text_parts = []
+    reasoning_parts = []
+
+    # JSON配列文字列形式
     if isinstance(content, str):
         stripped = content.strip()
-        if stripped.startswith("[{"):  # JSON オブジェクト配列の場合のみパース試行
+        if stripped.startswith("[{"):
             try:
                 parsed = json.loads(stripped)
                 if isinstance(parsed, list):
-                    return _extract_from_list(parsed)
+                    for block in parsed:
+                        if isinstance(block, dict):
+                            block_type = block.get("type")
+                            # GPT-OSS-120B: type="reasoning"
+                            if block_type == "reasoning":
+                                summary = block.get("summary", [])
+                                if isinstance(summary, list):
+                                    for item in summary:
+                                        if isinstance(item, dict) and item.get("type") == "summary_text":
+                                            reasoning_parts.append(item.get("text", ""))
+                                            reasoning_parts.append(" ")
+                            elif block_type == "thought":
+                                reasoning_parts.append(block.get("content", ""))
+                            elif block_type == "text":
+                                text_parts.append(block.get("text", ""))
+                                if "thoughtSignature" in block:
+                                    reasoning_parts.append(block.get("thoughtSignature", ""))
+                    return "".join(text_parts), "".join(reasoning_parts).strip()
             except (json.JSONDecodeError, ValueError):
                 pass
-        return content
-    if isinstance(content, list):
-        return _extract_from_list(content)
-    return str(content)
+
+        # XMLタグ形式
+        xml_patterns = [
+            r'<thinking>(.*?)</thinking>',   # LLaMA
+            r'<think>(.*?)</think>',         # その他
+        ]
+        for pattern in xml_patterns:
+            compiled = re.compile(pattern, re.DOTALL)
+            if compiled.search(content):
+                for match in compiled.finditer(content):
+                    reasoning_parts.append(match.group(1))
+                text_only = compiled.sub('', content)
+                return text_only, "".join(reasoning_parts)
+
+        return content, ""
+
+    # Pythonリスト形式
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, str):
+                text_parts.append(block)
+            elif isinstance(block, dict):
+                block_type = block.get("type")
+                if block_type == "reasoning":
+                    summary = block.get("summary", [])
+                    if isinstance(summary, list):
+                        for item in summary:
+                            if isinstance(item, dict) and item.get("type") == "summary_text":
+                                reasoning_parts.append(item.get("text", ""))
+                                reasoning_parts.append(" ")
+                elif block_type == "thought":
+                    reasoning_parts.append(block.get("content", ""))
+                elif block_type == "text":
+                    text_parts.append(block.get("text", ""))
+                    if "thoughtSignature" in block:
+                        reasoning_parts.append(block.get("thoughtSignature", ""))
+        return "".join(text_parts), "".join(reasoning_parts).strip()
+
+    return str(content), ""
 
 
 # ─── ストリームイベント処理: 共通ユーティリティ ──────────────────────────────
@@ -118,6 +163,8 @@ class _StreamState:
 
     accumulated_text: str = ""
     text_item_id: str | None = None
+    accumulated_reasoning: str = ""
+    reasoning_item_id: str | None = None
     output_items: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -168,21 +215,36 @@ def _process_main_agent_messages(
 ) -> Iterator[ResponsesAgentStreamEvent]:
     """メインエージェントの messages イベントを処理する.
 
-    AIMessageChunk のテキストトークンを抽出して yield し、
-    state.accumulated_text と state.text_item_id を更新する。
+    AIMessageChunk のテキストトークンと reasoning を分離して yield し、
+    state を更新する。
     """
     try:
         chunk = data[0]
         if isinstance(chunk, AIMessageChunk) and (content := chunk.content):
-            text = _extract_text_content(content)
+            text, reasoning = _extract_text_and_reasoning(content)
+            item_id = chunk.id or str(uuid4())
+
+            # テキストデルタ
             if text:
                 state.accumulated_text += text
-                state.text_item_id = chunk.id
+                state.text_item_id = item_id
                 yield _log_and_yield(
                     ResponsesAgentStreamEvent(
-                        **create_text_delta(
-                            delta=text, item_id=chunk.id or str(uuid4())
-                        )
+                        **create_text_delta(delta=text, item_id=item_id)
+                    )
+                )
+
+            # Reasoningデルタ
+            if reasoning:
+                state.accumulated_reasoning += reasoning
+                state.reasoning_item_id = item_id
+                yield _log_and_yield(
+                    ResponsesAgentStreamEvent.model_validate(
+                        {
+                            "type": "response.output_text.reasoning.delta",
+                            "delta": reasoning,
+                            "item_id": item_id,
+                        }
                     )
                 )
     except Exception as e:
@@ -205,6 +267,20 @@ def _finalize_stream(
             ResponsesAgentStreamEvent(
                 type="response.output_item.done",
                 item=text_output_item,  # type: ignore[call-arg]
+            )
+        )
+
+    # Reasoning item done
+    if state.accumulated_reasoning:
+        reasoning_output_item = create_reasoning_item(
+            id=state.reasoning_item_id or str(uuid4()),
+            reasoning_text=state.accumulated_reasoning,
+        )
+        state.output_items.append(reasoning_output_item)
+        yield _log_and_yield(
+            ResponsesAgentStreamEvent(
+                type="response.output_item.done",
+                item=reasoning_output_item,  # type: ignore[call-arg]
             )
         )
 
@@ -396,8 +472,9 @@ async def process_agent_astream_events(
                     yield item
 
     logger.debug(
-        "[stream] completed. accumulated_text_len=%d output_items=%d",
+        "[stream] completed. accumulated_text_len=%d reasoning_len=%d output_items=%d",
         len(state.accumulated_text),
+        len(state.accumulated_reasoning),
         len(state.output_items),
     )
 
