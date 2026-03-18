@@ -229,13 +229,14 @@ async def init_agent(
     override_subagent_model: Optional[BaseChatModel] = None,
 ):
 
-    ws_client = workspace_client or get_sp_workspace_client()
+    sp_ws_client = get_sp_workspace_client()
+    ws_client = workspace_client or sp_ws_client
     if not volume_path:
         raise ValueError("volume_path is required")
 
     # ユーザ認証スコープの関係上、MCPはサービスプリンシパルのリソース権限で動かす必要があるため、get_sp_workspace_client() を渡す。
     # mcp_tools = await get_mcp_tools(ws_client)
-    mcp_tools = await get_mcp_tools(get_sp_workspace_client())
+    mcp_tools = await get_mcp_tools(sp_ws_client)
 
     def backend(rt):
         return CompositeBackend(

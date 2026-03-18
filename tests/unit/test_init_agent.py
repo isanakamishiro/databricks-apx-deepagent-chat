@@ -98,19 +98,21 @@ async def test_init_agent_uses_sp_client_when_workspace_client_is_none(
 
 
 async def test_init_agent_uses_provided_workspace_client(mock_model, patches):
-    """workspace_client が指定されたとき get_sp_workspace_client() は呼ばれない."""
+    """workspace_client が指定されても get_sp_workspace_client() は MCP 用に1回呼ばれる."""
     custom_ws = MagicMock()
     await init_agent(model=mock_model, workspace_client=custom_ws, volume_path="/Volumes/a/b/c")
 
-    patches["get_sp_ws"].assert_not_called()
+    # MCP はスコープ権限の都合で常に SP クライアントを使用する
+    patches["get_sp_ws"].assert_called_once()
 
 
 async def test_init_agent_passes_correct_ws_to_get_mcp_tools(mock_model, patches):
-    """get_mcp_tools に使われる ws_client は workspace_client 引数から来る."""
+    """get_mcp_tools には常にサービスプリンシパルのクライアントが渡される."""
     custom_ws = MagicMock()
     await init_agent(model=mock_model, workspace_client=custom_ws, volume_path="/Volumes/a/b/c")
 
-    patches["get_mcp"].assert_awaited_once_with(custom_ws)
+    # MCP はユーザークライアントではなく SP クライアントで実行する（スコープ権限の問題対応）
+    patches["get_mcp"].assert_awaited_once_with(patches["get_sp_ws"].return_value)
 
 
 # ─── create_deep_agent への引数 ───────────────────────────────────────────────

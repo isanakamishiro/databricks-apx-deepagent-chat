@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, AsyncIterator, Iterator
 from uuid import uuid4
@@ -16,20 +17,54 @@ from mlflow.types.responses import (
 
 logger = logging.getLogger(__name__)
 
+# モジュールレベルでコンパイル済みXMLパターン（関数呼び出しごとの再コンパイルを回避）
+_XML_REASONING_PATTERNS = [
+    re.compile(r'<thinking>(.*?)</thinking>', re.DOTALL),  # LLaMA
+    re.compile(r'<think>(.*?)</think>', re.DOTALL),        # その他
+]
+
 
 # ─── テキスト・Reasoning 抽出 ──────────────────────────────────────────────────
 
 
-def _extract_text_and_reasoning(content) -> tuple[str, str]:
+def _process_blocks(blocks: list) -> tuple[list[str], list[str]]:
+    """dict ブロックのリストからテキストと reasoning を抽出する.
+
+    str 形式（JSONパース後）・list 形式の両方に対応する共通処理。
+    """
+    text_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    for block in blocks:
+        if isinstance(block, str):
+            text_parts.append(block)
+        elif isinstance(block, dict):
+            block_type = block.get("type")
+            # GPT-OSS-120B: type="reasoning"
+            if block_type == "reasoning":
+                summary = block.get("summary", [])
+                if isinstance(summary, list):
+                    for item in summary:
+                        if isinstance(item, dict) and item.get("type") == "summary_text":
+                            reasoning_parts.append(item.get("text", ""))
+            elif block_type == "thought":
+                reasoning_parts.append(block.get("content", ""))
+            elif block_type == "text":
+                text_parts.append(block.get("text", ""))
+                if "thoughtSignature" in block:
+                    reasoning_parts.append(block.get("thoughtSignature", ""))
+    return text_parts, reasoning_parts
+
+
+def _extract_text_and_reasoning(content: str | list | Any) -> tuple[str, str]:
     """AIMessage の content からテキストとreasoningを分離して返す.
+
+    - str 形式: JSON配列文字列 → _process_blocks、次に XMLタグ → regex 抽出を試みる
+    - list 形式: 構造化ブロックのみ処理（XML抽出は行わない）
+    - その他: str() に変換して返す
 
     Returns:
         (text, reasoning) のタプル
     """
-    import re
-    text_parts = []
-    reasoning_parts = []
-
     # JSON配列文字列形式
     if isinstance(content, str):
         stripped = content.strip()
@@ -37,63 +72,25 @@ def _extract_text_and_reasoning(content) -> tuple[str, str]:
             try:
                 parsed = json.loads(stripped)
                 if isinstance(parsed, list):
-                    for block in parsed:
-                        if isinstance(block, dict):
-                            block_type = block.get("type")
-                            # GPT-OSS-120B: type="reasoning"
-                            if block_type == "reasoning":
-                                summary = block.get("summary", [])
-                                if isinstance(summary, list):
-                                    for item in summary:
-                                        if isinstance(item, dict) and item.get("type") == "summary_text":
-                                            reasoning_parts.append(item.get("text", ""))
-                                            reasoning_parts.append(" ")
-                            elif block_type == "thought":
-                                reasoning_parts.append(block.get("content", ""))
-                            elif block_type == "text":
-                                text_parts.append(block.get("text", ""))
-                                if "thoughtSignature" in block:
-                                    reasoning_parts.append(block.get("thoughtSignature", ""))
-                    return "".join(text_parts), "".join(reasoning_parts).strip()
+                    text_parts, reasoning_parts = _process_blocks(parsed)
+                    return "".join(text_parts), " ".join(reasoning_parts)
             except (json.JSONDecodeError, ValueError):
                 pass
 
         # XMLタグ形式
-        xml_patterns = [
-            r'<thinking>(.*?)</thinking>',   # LLaMA
-            r'<think>(.*?)</think>',         # その他
-        ]
-        for pattern in xml_patterns:
-            compiled = re.compile(pattern, re.DOTALL)
-            if compiled.search(content):
-                for match in compiled.finditer(content):
-                    reasoning_parts.append(match.group(1))
-                text_only = compiled.sub('', content)
-                return text_only, "".join(reasoning_parts)
+        for pattern in _XML_REASONING_PATTERNS:
+            matches = list(pattern.finditer(content))
+            if matches:
+                reasoning = "".join(m.group(1) for m in matches)
+                text_only = pattern.sub('', content)
+                return text_only, reasoning
 
         return content, ""
 
-    # Pythonリスト形式
-    elif isinstance(content, list):
-        for block in content:
-            if isinstance(block, str):
-                text_parts.append(block)
-            elif isinstance(block, dict):
-                block_type = block.get("type")
-                if block_type == "reasoning":
-                    summary = block.get("summary", [])
-                    if isinstance(summary, list):
-                        for item in summary:
-                            if isinstance(item, dict) and item.get("type") == "summary_text":
-                                reasoning_parts.append(item.get("text", ""))
-                                reasoning_parts.append(" ")
-                elif block_type == "thought":
-                    reasoning_parts.append(block.get("content", ""))
-                elif block_type == "text":
-                    text_parts.append(block.get("text", ""))
-                    if "thoughtSignature" in block:
-                        reasoning_parts.append(block.get("thoughtSignature", ""))
-        return "".join(text_parts), "".join(reasoning_parts).strip()
+    # Pythonリスト形式（構造化ブロックのみ、XML処理なし）
+    if isinstance(content, list):
+        text_parts, reasoning_parts = _process_blocks(content)
+        return "".join(text_parts), " ".join(reasoning_parts)
 
     return str(content), ""
 
