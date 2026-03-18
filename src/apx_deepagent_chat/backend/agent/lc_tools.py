@@ -1,6 +1,9 @@
+import logging
 from typing import Optional
 
 from langchain_core.tools import tool as langchain_tool
+
+logger = logging.getLogger(__name__)
 
 
 @langchain_tool
@@ -31,7 +34,8 @@ def web_search(
             "検索エラー: リクエストがタイムアウトしました。後でもう一度試してください。"
         )
     except Exception as e:
-        return f"検索エラー: 予期しないエラーが発生しました: {type(e).__name__}: {e}"
+        logger.exception("Web search error")
+        return "検索エラー: 予期しないエラーが発生しました。後でもう一度試してください。"
 
     if not results:
         return "検索結果が見つかりませんでした。"
@@ -62,10 +66,11 @@ def web_fetch(url: str, max_length: int = 50000) -> str:
         return f"取得エラー: URL '{url}' に接続できませんでした。URLが正しいか確認してください。"
     except requests.Timeout:
         return f"取得エラー: URL '{url}' への接続がタイムアウトしました。"
-    except requests.HTTPError as e:
-        return f"取得エラー: HTTPエラーが発生しました (ステータス {e.response.status_code if e.response else '不明'}): {e}"
+    except requests.HTTPError:
+        return f"取得エラー: HTTPエラーが発生しました。URLが正しいか確認してください。"
     except Exception as e:
-        return f"取得エラー: 予期しないエラーが発生しました: {type(e).__name__}: {e}"
+        logger.exception("Web fetch error for URL: %s", url)
+        return "取得エラー: 予期しないエラーが発生しました。後でもう一度試してください。"
 
     text = result.text_content
     if not text or not text.strip():

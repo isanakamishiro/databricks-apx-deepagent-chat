@@ -20,7 +20,7 @@ from .._metadata import dist_dir
 from .agent import (  # also registers @invoke / @stream handlers
     _current_obo_token,
     _injected_sp_ws_client,
-    streaming,
+    stream_handler,
 )
 from .agent.job_store import JobStore
 from .core._base import LifespanDependency
@@ -41,7 +41,7 @@ _job_store = JobStore()
 # ─── 定期クリーンアップ ───────────────────────────────────────────────────────
 
 
-async def _periodic_cleanup(store: JobStore, interval: int = 60) -> None:
+async def _periodic_cleanup(store: JobStore, interval: int = 300) -> None:
     """interval 秒ごとに完了ジョブをクリーンアップする."""
     while True:
         await asyncio.sleep(interval)
@@ -51,7 +51,6 @@ async def _periodic_cleanup(store: JobStore, interval: int = 60) -> None:
 # ─── バックグラウンドエージェントタスク ──────────────────────────────────────
 
 
-# @mlflow.trace(name="run_agent", span_type="AGENT")
 async def _run_agent_background(job_id: str, body: dict) -> None:
     """エージェントをバックグラウンドで実行し、イベントを JobStore に蓄積する."""
 
@@ -72,11 +71,12 @@ async def _run_agent_background(job_id: str, body: dict) -> None:
             span.set_inputs(span_input)
 
             agent_request = ResponsesAgentRequest(**body)
-            async for event in streaming(agent_request):
+            async for event in stream_handler(agent_request):
                 event_type = str(event.type) if hasattr(event, "type") else ""
                 data = event.model_dump(mode="json")
                 _job_store.append_event(job_id, event_type, data)
             _job_store.mark_done(job_id)
+            span.set_outputs(data)
     except Exception:
         logger.exception("Background agent error for job %s", job_id)
         _job_store.mark_error(job_id, "Agent processing failed")

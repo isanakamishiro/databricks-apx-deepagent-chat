@@ -1,6 +1,9 @@
 import io
+import logging
 from pathlib import PurePosixPath
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import NotFound, ResourceDoesNotExist
@@ -122,7 +125,8 @@ async def files_upload(
     try:
         ws.files.upload(real_path, io.BytesIO(content), overwrite=True)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+        logger.exception("File upload failed for path: %s", real_path)
+        raise HTTPException(status_code=500, detail="Upload failed")
 
     return {"ok": True, "path": virtual_path}
 
@@ -138,7 +142,8 @@ async def files_mkdir(
     try:
         ws.files.create_directory(real_path)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create directory: {e}")
+        logger.exception("Directory creation failed for path: %s", real_path)
+        raise HTTPException(status_code=500, detail="Failed to create directory")
     return {"ok": True, "path": dir_path}
 
 
@@ -158,5 +163,6 @@ async def files_delete(
     except (NotFound, ResourceDoesNotExist):
         raise HTTPException(status_code=404, detail="File or directory not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
+        logger.exception("Delete failed for path: %s", real_path)
+        raise HTTPException(status_code=500, detail="Delete failed")
     return {"ok": True}

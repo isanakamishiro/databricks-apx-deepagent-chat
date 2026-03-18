@@ -26,7 +26,10 @@ def get_user_workspace_client() -> WorkspaceClient:
 
     _current_obo_token から OBOトークンを読み取り、毎回新しい WorkspaceClient を生成する。
     これによりストリーミングジェネレータ実行時も finally リセット後も正しいトークンが使われる。
-    フォールバック順: _current_obo_token → get_request_headers() → WorkspaceClient()
+    フォールバック順: _current_obo_token → get_request_headers()
+
+    Raises:
+        ValueError: トークンが利用できない場合
     """
     token = _current_obo_token.get()
     if token:
@@ -35,7 +38,7 @@ def get_user_workspace_client() -> WorkspaceClient:
     token = get_request_headers().get("x-forwarded-access-token")
     if token:
         return WorkspaceClient(token=token, auth_type="pat")
-    return WorkspaceClient()
+    raise ValueError("User authentication required: no token available")
 
 
 def get_sp_workspace_client() -> WorkspaceClient:

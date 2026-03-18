@@ -1,11 +1,12 @@
 import functools
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Union
 
 import yaml
 from databricks.sdk import WorkspaceClient
 from databricks_langchain import ChatDatabricks
+from langchain_core.language_models.model_profile import ModelProfile
 
 from .clients import get_sp_workspace_client
 
@@ -36,7 +37,9 @@ def _make_fake_model():
     return ToolCapableFakeModel(responses=[FAKE_RESPONSE] * 20)
 
 
-def init_model(model_name: str, ws: Optional[WorkspaceClient] = None):
+def init_model(
+    model_name: str, ws: Optional[WorkspaceClient] = None
+) -> Union[ChatDatabricks, Any]:
     if model_name == FAKE_MODEL_NAME:
         return _make_fake_model()
 
@@ -49,17 +52,19 @@ def init_model(model_name: str, ws: Optional[WorkspaceClient] = None):
     )
     if not model.profile:
         model_config = load_models_config().get(model_name, {})
-        model.profile = model_config.get(
-            "profile",
-            {
-                "max_input_tokens": 200000,
-                "max_output_tokens": 10000,
-                "text_inputs": True,
-                "tool_choice": True,
-                "tool_calling": True,
-                "structured_output": True,
-                "text_outputs": True,
-            },
+        model.profile = ModelProfile(
+            **model_config.get(
+                "profile",
+                {
+                    "max_input_tokens": 200000,
+                    "max_output_tokens": 10000,
+                    "text_inputs": True,
+                    "tool_choice": True,
+                    "tool_calling": True,
+                    "structured_output": True,
+                    "text_outputs": True,
+                },
+            )
         )
     model.max_tokens = model.profile.get("max_output_tokens")
     return model

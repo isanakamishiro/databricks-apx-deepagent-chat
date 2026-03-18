@@ -24,7 +24,7 @@ class Job:
     notify: asyncio.Event = field(default_factory=asyncio.Event)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     error: Optional[str] = None
-    task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
+    task: Optional[asyncio.Task] = None
 
 
 class JobStore:

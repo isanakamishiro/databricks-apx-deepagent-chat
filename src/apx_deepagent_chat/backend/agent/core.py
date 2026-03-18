@@ -206,13 +206,13 @@ def _build_subagents(
             # run_limit: 会話全体での最大実行回数（サブエージェントのYAML定義のbudgetと合わせること）
             ToolCallLimitMiddleware(
                 tool_name="web_search",
-                thread_limit=12,
-                run_limit=3,
+                thread_limit=40,
+                run_limit=10,
             ),
             ToolCallLimitMiddleware(
                 tool_name="web_fetch",
-                thread_limit=20,
-                run_limit=5,
+                thread_limit=80,
+                run_limit=20,
             ),
         ]
 
@@ -277,11 +277,11 @@ async def init_agent(
 
 
 @invoke()
-async def non_streaming(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
+async def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
     outputs = []
     completed_response: dict | None = None
     error_msg: str | None = None
-    async for event in streaming(request):
+    async for event in stream_handler(request):
         if event.type == "response.output_item.done":
             outputs.append(event.item)  # type: ignore[attr-defined]
         elif event.type == "response.completed":
@@ -317,20 +317,21 @@ async def non_streaming(request: ResponsesAgentRequest) -> ResponsesAgentRespons
 
 
 @stream()
-async def streaming(
+async def stream_handler(
     request: ResponsesAgentRequest,
 ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
+    user_workspace_client = get_user_workspace_client()
+    volume_path = _get_volume_path(request)
+    thread_id = _get_or_create_thread_id(request)
+    mlflow.update_current_trace(metadata={"mlflow.trace.session": thread_id})
+
+    checkpointer = UCBundleCheckpointer(
+        volume_path=volume_path,
+        thread_id=thread_id,
+        workspace_client=user_workspace_client,
+    )
+
     try:
-        user_workspace_client = get_user_workspace_client()
-        volume_path = _get_volume_path(request)
-        thread_id = _get_or_create_thread_id(request)
-
-        checkpointer = UCBundleCheckpointer(
-            volume_path=volume_path,
-            thread_id=thread_id,
-            workspace_client=user_workspace_client,
-        )
-
         async with checkpointer:
             model_name = (
                 _get_model_name(request) if not USE_FAKE_MODEL else FAKE_MODEL_NAME
@@ -352,8 +353,9 @@ async def streaming(
                 [i.model_dump() for i in request.input]
             )
             # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
-            messages = {
+            input_state = {
                 "messages": [all_messages[-1]] if all_messages else [],
+                "custom_inputs": dict(request.custom_inputs or {}),
                 "files": _load_preset_files(),
             }
             config = {
@@ -367,7 +369,7 @@ async def streaming(
             }
             async for event in process_agent_astream_events(
                 agent.astream(
-                    input=messages,
+                    input=input_state,
                     config=config,
                     stream_mode=["updates", "messages"],
                     subgraphs=True,
@@ -382,5 +384,5 @@ async def streaming(
         logger.exception("Streaming error: %s", e)
         yield ResponsesAgentStreamEvent(
             type="error",
-            message=str(e),  # type: ignore
+            message="An error occurred while processing your request. Please try again.",  # type: ignore
         )

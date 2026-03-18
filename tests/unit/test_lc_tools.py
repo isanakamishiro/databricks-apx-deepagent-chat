@@ -45,12 +45,13 @@ def test_web_search_timeout_error():
 
 
 def test_web_search_unexpected_error():
-    """予期しない例外 → 汎用エラーメッセージを返す."""
+    """予期しない例外 → 汎用エラーメッセージを返す（例外詳細はログのみ）."""
     with patch("ddgs.DDGS") as mock_ddgs_cls:
         mock_ddgs_cls.return_value.text.side_effect = RuntimeError("network error")
         result = web_search.run({"query": "任意"})
     assert "予期しないエラー" in result
-    assert "RuntimeError" in result
+    # 例外クラス名はエラーメッセージに含まれない（セキュリティのため）
+    assert "RuntimeError" not in result
 
 
 def test_web_search_multiple_results_numbered():
@@ -132,7 +133,7 @@ def test_web_fetch_timeout():
 
 
 def test_web_fetch_http_error_with_status():
-    """HTTPError → ステータスコード付きエラーメッセージを返す."""
+    """HTTPError → 汎用エラーメッセージを返す（除外セキュリティのため）."""
     import requests
 
     http_err = requests.HTTPError()
@@ -142,16 +143,18 @@ def test_web_fetch_http_error_with_status():
     with patch("markitdown.MarkItDown") as mock_md_cls:
         mock_md_cls.return_value.convert_url.side_effect = http_err
         result = web_fetch.run({"url": "https://notfound.example.com"})
-    assert "404" in result
+    # ステータスコードはエラーメッセージに含まれない（セキュリティのため）
+    assert "HTTPエラー" in result
 
 
 def test_web_fetch_unexpected_error():
-    """予期しない例外 → 汎用エラーメッセージを返す."""
+    """予期しない例外 → 汎用エラーメッセージを返す（例外詳細はログのみ）."""
     with patch("markitdown.MarkItDown") as mock_md_cls:
         mock_md_cls.return_value.convert_url.side_effect = ValueError("parse failed")
         result = web_fetch.run({"url": "https://example.com"})
     assert "予期しないエラー" in result
-    assert "ValueError" in result
+    # 例外クラス名はエラーメッセージに含まれない（セキュリティのため）
+    assert "ValueError" not in result
 
 
 # ─── get_current_time ─────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ class _ConfigDependency(LifespanDependency):
     @asynccontextmanager
     async def lifespan(self, app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.config = AppConfig()
-        logger.info(f"Starting app with configuration:\n{app.state.config}")
+        logger.info("Starting application")
         yield
 
     @staticmethod

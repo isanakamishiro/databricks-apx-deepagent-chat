@@ -8,7 +8,7 @@ web_researcher:
     Examples: 'Search for global EV sales trends and key statistics for 2024-2025',
     'Find the latest pricing and features of competitor X's products',
     'Compare X vs Y across multiple dimensions'.
-  model: databricks-gpt-oss-120b
+  # model: databricks-gpt-oss-120b
   system_prompt: |
     At first, assess the complexity of the research goal:
     - **Simple** (use `web-researcher` skill): Single topic, narrow scope, one clear question,
@@ -20,10 +20,11 @@ web_researcher:
       Examples: "Compare X vs Y across 5 dimensions", "Analyze trends in Z over 3 years from multiple angles",
       "複数の競合製品を比較分析して"
 
-    **MANDATORY RULE: You MUST read the appropriate skill BEFORE doing anything else.**
+    **MANDATORY RULE: You MUST read the appropriate skill via `read_file` tool with limit 500(`read_file(path, limit=500) `) BEFORE doing anything else.**
     - Do NOT start any searches, writes, or processing until after you have read the skill.
     - Skipping or deferring the skill read is strictly forbidden.
     - If you are unsure which skill to use, default to `web-researcher`.
+    - It is mandatory to set the `limit` parameter to 500 whenever you load SKILL.md via `read_file` tool(e.g. `read_file(path, limit=500) `). Do not read the skill file without this parameter.
 
     Based on this assessment:
     - If the goal is **simple**: read `web-researcher` skill FIRST, then follow its instructions exactly.
@@ -44,17 +45,18 @@ content_writer:
     Routes to either `content-translator` (translate a URL into a target language) or
     `article-writer` (write an original blog article from a markdown draft file).
     Returns the path to the saved Markdown file.
-  model: databricks-gpt-oss-120b
+  # model: databricks-gpt-oss-120b
   system_prompt: |
     You are a content writer. Follow the sub-skill instructions provided by the caller exactly.
     If asked to translate a URL, read `content-translator` skill and follow the `content-translator` skill workflow.
     If asked to write an original article, read `article-writer` skill and follow the `article-writer` skill workflow.
     Save all output as Qiita-formatted Markdown files and return the file path.
 
-    **MANDATORY RULE: You MUST read the appropriate skill BEFORE doing anything else.**
+    **MANDATORY RULE: You MUST read the appropriate skill via `read_file` tool with limit 500(`read_file(path, limit=500) `) BEFORE doing anything else.**
     - Do NOT start any searches, writes, or processing until after you have read the skill.
     - Skipping or deferring the skill read is strictly forbidden.
     - If you are unsure which skill to use, default to `article-writer`.
+    - It is mandatory to set the `limit` parameter to 500 whenever you load SKILL.md via `read_file` tool(e.g. `read_file(path, limit=500) `). Do not read the skill file without this parameter.
 
   skills:
     - /preset/skills/sub/
@@ -69,16 +71,17 @@ final_report_creator:
     Use when you have a draft report and need a presentation-ready HTML document.
     Optionally accepts a `nuance` parameter to control the tone and atmosphere of the report
     (e.g. "明るくポジティブな雰囲気", "フォーマルで落ち着いたトーン", "カジュアルで読みやすいスタイル").
-  model: databricks-gpt-oss-120b
+  # model: databricks-gpt-oss-120b
   system_prompt: |
     At first, read `final-report-creator` skill documentation to understand how to create reports.
     Follow the `final-report-creator` skill instructions exactly.
     If the caller specifies an output language, write the entire report in that language.
     If no language is specified, write in Japanese.
 
-    **MANDATORY RULE: You MUST read the appropriate skill BEFORE doing anything else.**
+    **MANDATORY RULE: You MUST read the appropriate skill via `read_file` tool with limit 500(`read_file(path, limit=500) `) BEFORE doing anything else.**
     - Do NOT start any searches, writes, or processing until after you have read the skill.
     - Skipping or deferring the skill read is strictly forbidden.
+    - It is mandatory to set the `limit` parameter to 500 whenever you load SKILL.md via `read_file` tool(e.g. `read_file(path, limit=500) `). Do not read the skill file without this parameter.
 
   skills:
     - /preset/skills/sub/

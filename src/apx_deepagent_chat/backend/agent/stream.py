@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, AsyncIterator, Iterator
 from uuid import uuid4
 
+from langchain_core.language_models.model_profile import ModelProfile
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from mlflow.types.responses import (
     ResponsesAgentStreamEvent,
@@ -330,7 +331,7 @@ async def process_agent_astream_events(
     async_stream: AsyncIterator[Any],
     usage_accumulator: dict[str, int] | None = None,
     model: str | None = None,
-    model_profile: dict[str, Any] | None = None,
+    model_profile: ModelProfile | None = None,
 ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
     """agent.astream() のストリームを受け取り ResponsesAgentStreamEvent を yield する.
 

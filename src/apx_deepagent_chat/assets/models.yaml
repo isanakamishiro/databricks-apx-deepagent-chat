@@ -54,3 +54,26 @@ models:
       tool_calling: true
       structured_output: true
       text_outputs: true
+
+  # 外部モデル追加のサンプル
+  nvidia-nim-qwen3-5-122b-a10b:
+    display_name: "Qwen3.5-122b-a10b"
+    profile:
+      max_input_tokens: 200000
+      max_output_tokens: 32768
+      text_inputs: true
+      tool_choice: true
+      tool_calling: true
+      structured_output: true
+      text_outputs: true
+
+  nvidia-nim-nemotron-3-super-120b-a12b:
+    display_name: "Nemotoron 3 Super 120B-a12b"
+    profile:
+      max_input_tokens: 200000
+      max_output_tokens: 32768
+      text_inputs: true
+      tool_choice: true
+      tool_calling: true
+      structured_output: true
+      text_outputs: true
