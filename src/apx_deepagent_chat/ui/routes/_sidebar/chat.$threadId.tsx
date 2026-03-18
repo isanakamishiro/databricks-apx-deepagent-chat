@@ -78,12 +78,18 @@ type ToolCallBlock = {
   state: ToolCallState;
 };
 
+// 実行順を保持するための統合ブロック型
+type ChatBlock =
+  | (ToolCallBlock & { type: "tool" })
+  | (SubAgentBlockData & { type: "subagent" });
+
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   thinking?: string;
-  toolCallBlocks?: ToolCallBlock[];
-  subAgentBlocks?: SubAgentBlockData[];
+  blocks?: ChatBlock[];               // 実行順の統合ブロック配列
+  toolCallBlocks?: ToolCallBlock[];   // 後方互換性のために残す
+  subAgentBlocks?: SubAgentBlockData[]; // 後方互換性のために残す
   isError?: boolean;
   usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
   model?: string;
@@ -97,25 +103,51 @@ const FILE_WRITE_TOOL_NAMES = new Set(["write_file", "edit_file"]);
 function extractWrittenFiles(message: ChatMessage): string[] {
   const paths = new Set<string>();
 
-  for (const block of message.toolCallBlocks ?? []) {
-    if (FILE_WRITE_TOOL_NAMES.has(block.name) && block.state === "output-available") {
-      try {
-        const args = JSON.parse(block.arguments);
-        if (args.file_path) paths.add(args.file_path);
-      } catch {
-        // ignore
+  if (message.blocks) {
+    for (const block of message.blocks) {
+      if (block.type === "tool") {
+        if (FILE_WRITE_TOOL_NAMES.has(block.name) && block.state === "output-available") {
+          try {
+            const args = JSON.parse(block.arguments);
+            if (args.file_path) paths.add(args.file_path);
+          } catch {
+            // ignore
+          }
+        }
+      } else {
+        for (const tc of block.toolCalls) {
+          if (FILE_WRITE_TOOL_NAMES.has(tc.name) && tc.state === "output-available") {
+            try {
+              const args = JSON.parse(tc.arguments);
+              if (args.file_path) paths.add(args.file_path);
+            } catch {
+              // ignore
+            }
+          }
+        }
       }
     }
-  }
-
-  for (const sub of message.subAgentBlocks ?? []) {
-    for (const tc of sub.toolCalls) {
-      if (FILE_WRITE_TOOL_NAMES.has(tc.name) && tc.state === "output-available") {
+  } else {
+    for (const block of message.toolCallBlocks ?? []) {
+      if (FILE_WRITE_TOOL_NAMES.has(block.name) && block.state === "output-available") {
         try {
-          const args = JSON.parse(tc.arguments);
+          const args = JSON.parse(block.arguments);
           if (args.file_path) paths.add(args.file_path);
         } catch {
           // ignore
+        }
+      }
+    }
+
+    for (const sub of message.subAgentBlocks ?? []) {
+      for (const tc of sub.toolCalls) {
+        if (FILE_WRITE_TOOL_NAMES.has(tc.name) && tc.state === "output-available") {
+          try {
+            const args = JSON.parse(tc.arguments);
+            if (args.file_path) paths.add(args.file_path);
+          } catch {
+            // ignore
+          }
         }
       }
     }
@@ -300,7 +332,7 @@ function ChatPage() {
     setMessages((prev) => [
       ...prev,
       { role: "user", content: text },
-      { role: "assistant", content: "", toolCallBlocks: [] },
+      { role: "assistant", content: "", blocks: [], toolCallBlocks: [] },
     ]);
 
     const ctrl = new AbortController();
@@ -420,12 +452,17 @@ function ChatPage() {
                       const updated = [...prev];
                       const last = updated[updated.length - 1];
                       if (last?.role === "assistant") {
-                        const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                        const subAgentBlocks = (last.subAgentBlocks ?? []).map((b) =>
                           b.callId === callId
                             ? { ...b, agentType, state: "running" as const }
                             : b
                         );
-                        updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                        const newBlocks = (last.blocks ?? []).map((b) =>
+                          b.type === "subagent" && b.callId === callId
+                            ? { ...b, agentType, state: "running" as const }
+                            : b
+                        );
+                        updated[updated.length - 1] = { ...last, subAgentBlocks, blocks: newBlocks };
                       }
                       return updated;
                     });
@@ -436,12 +473,17 @@ function ChatPage() {
                       const updated = [...prev];
                       const last = updated[updated.length - 1];
                       if (last?.role === "assistant") {
-                        const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                        const subAgentBlocks = (last.subAgentBlocks ?? []).map((b) =>
                           b.callId === callId
                             ? { ...b, state: "done" as const }
                             : b
                         );
-                        updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                        const newBlocks = (last.blocks ?? []).map((b) =>
+                          b.type === "subagent" && b.callId === callId
+                            ? { ...b, state: "done" as const }
+                            : b
+                        );
+                        updated[updated.length - 1] = { ...last, subAgentBlocks, blocks: newBlocks };
                       }
                       return updated;
                     });
@@ -467,6 +509,10 @@ function ChatPage() {
                                 ...(last.subAgentBlocks ?? []),
                                 newSubAgent,
                               ],
+                              blocks: [
+                                ...(last.blocks ?? []),
+                                { type: "subagent" as const, ...newSubAgent },
+                              ],
                             };
                           }
                           return updated;
@@ -483,12 +529,17 @@ function ChatPage() {
                           const updated = [...prev];
                           const last = updated[updated.length - 1];
                           if (last?.role === "assistant") {
-                            const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                            const subAgentBlocks = (last.subAgentBlocks ?? []).map((b) =>
                               b.callId === activeCallId
                                 ? { ...b, toolCalls: [...b.toolCalls, newTool] }
                                 : b
                             );
-                            updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                            const newBlocks = (last.blocks ?? []).map((b) =>
+                              b.type === "subagent" && b.callId === activeCallId
+                                ? { ...b, toolCalls: [...b.toolCalls, newTool] }
+                                : b
+                            );
+                            updated[updated.length - 1] = { ...last, subAgentBlocks, blocks: newBlocks };
                           }
                           return updated;
                         });
@@ -510,6 +561,10 @@ function ChatPage() {
                                 ...(last.toolCallBlocks ?? []),
                                 newBlock,
                               ],
+                              blocks: [
+                                ...(last.blocks ?? []),
+                                { type: "tool" as const, ...newBlock },
+                              ],
                             };
                           }
                           return updated;
@@ -525,7 +580,7 @@ function ChatPage() {
                         if (last?.role === "assistant") {
                           // サブエージェント内のツール結果
                           if (activeCallId) {
-                            const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                            const subAgentBlocks = (last.subAgentBlocks ?? []).map((b) =>
                               b.callId === activeCallId
                                 ? {
                                     ...b,
@@ -537,28 +592,50 @@ function ChatPage() {
                                   }
                                 : b
                             );
-                            updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                            const newBlocks = (last.blocks ?? []).map((b) =>
+                              b.type === "subagent" && b.callId === activeCallId
+                                ? {
+                                    ...b,
+                                    toolCalls: b.toolCalls.map((t) =>
+                                      t.callId === callId
+                                        ? { ...t, result, state: "output-available" as ToolCallState }
+                                        : t
+                                    ),
+                                  }
+                                : b
+                            );
+                            updated[updated.length - 1] = { ...last, subAgentBlocks, blocks: newBlocks };
                           } else {
                             // task の完了結果か、通常ツールの結果かを判定
                             const isSubagentResult = (last.subAgentBlocks ?? []).some(
                               (b) => b.callId === callId
+                            ) || (last.blocks ?? []).some(
+                              (b) => b.type === "subagent" && b.callId === callId
                             );
                             if (isSubagentResult) {
                               // SubAgentBlock の result に保存
-                              const blocks = (last.subAgentBlocks ?? []).map((b) =>
+                              const subAgentBlocks = (last.subAgentBlocks ?? []).map((b) =>
                                 b.callId === callId ? { ...b, result } : b
                               );
-                              updated[updated.length - 1] = { ...last, subAgentBlocks: blocks };
+                              const newBlocks = (last.blocks ?? []).map((b) =>
+                                b.type === "subagent" && b.callId === callId
+                                  ? { ...b, result }
+                                  : b
+                              );
+                              updated[updated.length - 1] = { ...last, subAgentBlocks, blocks: newBlocks };
                             } else {
                               // 通常ツールの結果
-                              updated[updated.length - 1] = {
-                                ...last,
-                                toolCallBlocks: (last.toolCallBlocks ?? []).map((b) =>
-                                  b.callId === callId
-                                    ? { ...b, result, state: "output-available" as const }
-                                    : b
-                                ),
-                              };
+                              const toolCallBlocks = (last.toolCallBlocks ?? []).map((b) =>
+                                b.callId === callId
+                                  ? { ...b, result, state: "output-available" as const }
+                                  : b
+                              );
+                              const newBlocks = (last.blocks ?? []).map((b) =>
+                                b.type === "tool" && b.callId === callId
+                                  ? { ...b, result, state: "output-available" as const }
+                                  : b
+                              );
+                              updated[updated.length - 1] = { ...last, toolCallBlocks, blocks: newBlocks };
                             }
                           }
                         }
@@ -805,44 +882,89 @@ function ChatContent({
                     <ReasoningContent>{msg.thinking}</ReasoningContent>
                   </Reasoning>
                 )}
-                {(msg.subAgentBlocks?.length || msg.toolCallBlocks?.length) ? (
+                {(msg.blocks?.length || msg.subAgentBlocks?.length || msg.toolCallBlocks?.length) ? (
                   <div className="space-y-2 w-full">
-                    {msg.subAgentBlocks?.map((block, bi) => (
-                      <SubAgentBlock
-                        key={`sa-${bi}`}
-                        block={block}
-                      />
-                    ))}
-                    {msg.toolCallBlocks?.map((block, bi) => {
-                      let parsedArgs: Record<string, unknown> = {};
-                      try {
-                        parsedArgs = JSON.parse(block.arguments || "{}");
-                      } catch {
-                        parsedArgs = { raw: block.arguments };
-                      }
-                      return (
-                        <Tool key={`t-${bi}`}>
-                          <ToolHeader
-                            title={block.name}
-                            type="tool-call"
-                            state={block.state}
-                          />
-                          <ToolContent>
-                            <ToolInput input={parsedArgs} />
-                            {block.result !== undefined && (
-                              <ToolOutput
-                                output={block.result}
-                                errorText={
-                                  block.state === "output-error"
-                                    ? block.result
-                                    : undefined
-                                }
+                    {msg.blocks
+                      ? msg.blocks.map((block, bi) => {
+                          if (block.type === "subagent") {
+                            return (
+                              <SubAgentBlock
+                                key={`sa-${bi}`}
+                                block={block}
                               />
-                            )}
-                          </ToolContent>
-                        </Tool>
-                      );
-                    })}
+                            );
+                          }
+                          let parsedArgs: Record<string, unknown> = {};
+                          try {
+                            parsedArgs = JSON.parse(block.arguments || "{}");
+                          } catch {
+                            parsedArgs = { raw: block.arguments };
+                          }
+                          return (
+                            <Tool key={`t-${bi}`}>
+                              <ToolHeader
+                                title={block.name}
+                                type="tool-call"
+                                state={block.state}
+                              />
+                              <ToolContent>
+                                <ToolInput input={parsedArgs} />
+                                {block.result !== undefined && (
+                                  <ToolOutput
+                                    output={block.result}
+                                    errorText={
+                                      block.state === "output-error"
+                                        ? block.result
+                                        : undefined
+                                    }
+                                  />
+                                )}
+                              </ToolContent>
+                            </Tool>
+                          );
+                        })
+                      : (
+                        // 後方互換: blocks フィールドのない旧保存データ用フォールバック
+                        <>
+                          {msg.subAgentBlocks?.map((block, bi) => (
+                            <SubAgentBlock
+                              key={`sa-${bi}`}
+                              block={block}
+                            />
+                          ))}
+                          {msg.toolCallBlocks?.map((block, bi) => {
+                            let parsedArgs: Record<string, unknown> = {};
+                            try {
+                              parsedArgs = JSON.parse(block.arguments || "{}");
+                            } catch {
+                              parsedArgs = { raw: block.arguments };
+                            }
+                            return (
+                              <Tool key={`t-${bi}`}>
+                                <ToolHeader
+                                  title={block.name}
+                                  type="tool-call"
+                                  state={block.state}
+                                />
+                                <ToolContent>
+                                  <ToolInput input={parsedArgs} />
+                                  {block.result !== undefined && (
+                                    <ToolOutput
+                                      output={block.result}
+                                      errorText={
+                                        block.state === "output-error"
+                                          ? block.result
+                                          : undefined
+                                      }
+                                    />
+                                  )}
+                                </ToolContent>
+                              </Tool>
+                            );
+                          })}
+                        </>
+                      )
+                    }
                   </div>
                 ) : null}
                 <MessageContent>

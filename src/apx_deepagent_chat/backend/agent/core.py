@@ -66,7 +66,7 @@ class _AgentPrewarm(LifespanDependency):
         t0 = time.monotonic()
         try:
             await asyncio.gather(
-                get_mcp_tools(get_user_workspace_client()),
+                get_mcp_tools(get_sp_workspace_client()),
                 asyncio.to_thread(_load_subagents, _SUBAGENTS_CONFIG_PATH),
                 asyncio.to_thread(_load_system_prompt, _SYSTEM_PROMPT_PATH),
                 asyncio.to_thread(_load_preset_files),
@@ -233,7 +233,9 @@ async def init_agent(
     if not volume_path:
         raise ValueError("volume_path is required")
 
-    mcp_tools = await get_mcp_tools(ws_client)
+    # ユーザ認証スコープの関係上、MCPはサービスプリンシパルのリソース権限で動かす必要があるため、get_sp_workspace_client() を渡す。
+    # mcp_tools = await get_mcp_tools(ws_client)
+    mcp_tools = await get_mcp_tools(get_sp_workspace_client())
 
     def backend(rt):
         return CompositeBackend(
