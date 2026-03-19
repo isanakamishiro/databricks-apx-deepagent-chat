@@ -5,23 +5,30 @@ import {
   PromptInputBody,
   PromptInputFooter,
   PromptInputProvider,
-  PromptInputSelect,
-  PromptInputSelectContent,
-  PromptInputSelectItem,
-  PromptInputSelectTrigger,
-  PromptInputSelectValue,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input";
 import {
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorName,
+  ModelSelectorTrigger,
+} from "@/components/ai-elements/model-selector";
+import {
   Suggestion,
   Suggestions,
 } from "@/components/ai-elements/suggestion";
 import { VolumeExplorer } from "@/components/chat/volume-explorer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { AlertTriangle, CheckIcon } from "lucide-react";
 
 export const Route = createFileRoute("/_sidebar/chat/")({
   component: () => <ChatIndexPage />,
@@ -54,6 +61,7 @@ function ChatIndexContent() {
     () => localStorage.getItem(STORAGE_KEY_MODEL) ?? ""
   );
   const [availableModels, setAvailableModels] = useState<{id: string; display_name: string}[]>([]);
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/config")
@@ -133,21 +141,40 @@ function ChatIndexContent() {
           <PromptInputFooter>
             <PromptInputTools>
               {availableModels.length > 0 && (
-                <PromptInputSelect
-                  value={selectedModel}
-                  onValueChange={handleModelChange}
-                >
-                  <PromptInputSelectTrigger className="h-7 text-xs max-w-[180px]">
-                    <PromptInputSelectValue placeholder="モデル選択" />
-                  </PromptInputSelectTrigger>
-                  <PromptInputSelectContent>
-                    {availableModels.map((m) => (
-                      <PromptInputSelectItem key={m.id} value={m.id}>
-                        {m.display_name}
-                      </PromptInputSelectItem>
-                    ))}
-                  </PromptInputSelectContent>
-                </PromptInputSelect>
+                <ModelSelector open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
+                  <ModelSelectorTrigger asChild>
+                    <Button variant="outline" className="h-7 text-xs px-2 max-w-[180px] justify-between">
+                      <ModelSelectorName>
+                        {availableModels.find((m) => m.id === selectedModel)?.display_name ?? "モデル選択"}
+                      </ModelSelectorName>
+                    </Button>
+                  </ModelSelectorTrigger>
+                  <ModelSelectorContent>
+                    <ModelSelectorInput placeholder="モデルを検索..." />
+                    <ModelSelectorList>
+                      <ModelSelectorEmpty>モデルが見つかりません</ModelSelectorEmpty>
+                      <ModelSelectorGroup heading="利用可能なモデル">
+                        {availableModels.map((m) => (
+                          <ModelSelectorItem
+                            key={m.id}
+                            value={m.id}
+                            onSelect={() => {
+                              handleModelChange(m.id);
+                              setModelSelectorOpen(false);
+                            }}
+                          >
+                            <ModelSelectorName>{m.display_name}</ModelSelectorName>
+                            {selectedModel === m.id ? (
+                              <CheckIcon className="ml-auto size-4" />
+                            ) : (
+                              <div className="ml-auto size-4" />
+                            )}
+                          </ModelSelectorItem>
+                        ))}
+                      </ModelSelectorGroup>
+                    </ModelSelectorList>
+                  </ModelSelectorContent>
+                </ModelSelector>
               )}
               <VolumeExplorer value={volumePath} onSelect={handleVolumeSelect} />
             </PromptInputTools>
