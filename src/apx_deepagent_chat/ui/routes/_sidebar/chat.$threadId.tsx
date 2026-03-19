@@ -854,7 +854,11 @@ function ChatContent({
                         }}
                       >
                         <ModelSelectorName>{m.display_name}</ModelSelectorName>
-                        <CheckIcon className={`ml-auto size-4 ${selectedModel !== m.id ? "invisible" : ""}`} />
+                        {selectedModel === m.id ? (
+                          <CheckIcon className="ml-auto size-4" />
+                        ) : (
+                          <div className="ml-auto size-4" />
+                        )}
                       </ModelSelectorItem>
                     ))}
                   </ModelSelectorGroup>
