@@ -9,9 +9,8 @@ from databricks.sdk import WorkspaceClient
 from databricks_langchain.utils import get_async_openai_client, get_openai_client
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.model_profile import ModelProfile
-from langchain_openai.chat_models.base import BaseChatOpenAI
-
 from .clients import get_sp_workspace_client
+from .reasoning_model import ChatOpenAIWithReasoning
 
 ASSETS_DIR = Path(__file__).parent.parent.parent / "assets"
 
@@ -56,7 +55,7 @@ def init_model(model_name: str, ws: Optional[WorkspaceClient] = None) -> BaseCha
     async_client = get_async_openai_client(workspace_client=ws_client)
 
     # root_client と client を両方渡すことで内部の client 再生成をスキップする
-    model = BaseChatOpenAI(
+    model = ChatOpenAIWithReasoning(
         model=model_name,  # type: ignore[unknown-argument]
         root_client=sync_client,
         root_async_client=async_client,
