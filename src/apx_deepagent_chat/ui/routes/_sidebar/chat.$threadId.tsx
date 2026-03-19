@@ -42,15 +42,23 @@ import {
   PromptInputBody,
   PromptInputFooter,
   PromptInputProvider,
-  PromptInputSelect,
-  PromptInputSelectContent,
-  PromptInputSelectItem,
-  PromptInputSelectTrigger,
-  PromptInputSelectValue,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
+import {
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorName,
+  ModelSelectorTrigger,
+} from "@/components/ai-elements/model-selector";
+import { Button } from "@/components/ui/button";
+import { CheckIcon } from "lucide-react";
 import { VolumeExplorer } from "@/components/chat/volume-explorer";
 import { GeneratedFiles } from "@/components/chat/generated-files";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -806,6 +814,8 @@ function ChatContent({
   onVolumeSelect,
   onModelChange,
 }: ChatContentProps) {
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+
   const handleFormSubmit = ({ text }: { text: string; files: unknown[] }) => {
     onSubmit(text);
   };
@@ -821,24 +831,36 @@ function ChatContent({
       <PromptInputFooter>
         <PromptInputTools>
           {availableModels.length > 0 && (
-            <PromptInputSelect
-              value={selectedModel}
-              onValueChange={(v) => {
-                localStorage.setItem("apx_selected_model", v);
-                onModelChange(v);
-              }}
-            >
-              <PromptInputSelectTrigger className="h-7 text-xs max-w-[180px]">
-                <PromptInputSelectValue placeholder="モデル選択" />
-              </PromptInputSelectTrigger>
-              <PromptInputSelectContent>
-                {availableModels.map((m) => (
-                  <PromptInputSelectItem key={m.id} value={m.id}>
-                    {m.display_name}
-                  </PromptInputSelectItem>
-                ))}
-              </PromptInputSelectContent>
-            </PromptInputSelect>
+            <ModelSelector open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
+              <ModelSelectorTrigger asChild>
+                <Button variant="outline" className="h-7 text-xs px-2 max-w-[180px] justify-between">
+                  <ModelSelectorName>
+                    {availableModels.find((m) => m.id === selectedModel)?.display_name ?? "モデル選択"}
+                  </ModelSelectorName>
+                </Button>
+              </ModelSelectorTrigger>
+              <ModelSelectorContent>
+                <ModelSelectorInput placeholder="モデルを検索..." />
+                <ModelSelectorList>
+                  <ModelSelectorEmpty>モデルが見つかりません</ModelSelectorEmpty>
+                  <ModelSelectorGroup heading="利用可能なモデル">
+                    {availableModels.map((m) => (
+                      <ModelSelectorItem
+                        key={m.id}
+                        value={m.id}
+                        onSelect={() => {
+                          onModelChange(m.id);
+                          setModelSelectorOpen(false);
+                        }}
+                      >
+                        <ModelSelectorName>{m.display_name}</ModelSelectorName>
+                        <CheckIcon className={`ml-auto size-4 ${selectedModel !== m.id ? "invisible" : ""}`} />
+                      </ModelSelectorItem>
+                    ))}
+                  </ModelSelectorGroup>
+                </ModelSelectorList>
+              </ModelSelectorContent>
+            </ModelSelector>
           )}
           <VolumeExplorer value={volumePath} onSelect={onVolumeSelect} />
         </PromptInputTools>
