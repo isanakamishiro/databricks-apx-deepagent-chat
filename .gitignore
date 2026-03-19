@@ -243,3 +243,4 @@ docs/superpowers/
 .coverage
 
 after-catalog-expand.yaml.worktrees/
+.worktrees/

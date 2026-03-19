@@ -62,6 +62,10 @@ models:
   # 外部モデル追加のサンプル
   ext-endpoint-high:
     display_name: "Ext Hight LLM"
+    params:
+      temperature: 1.0
+      top_p: 1.0
+      extra_body: {"chat_template_kwargs": {"enable_thinking":True,"clear_thinking":False}}
     profile:
       max_input_tokens: 200000
       max_output_tokens: 32768

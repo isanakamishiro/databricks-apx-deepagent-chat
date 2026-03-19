@@ -7,7 +7,6 @@ from apx_deepagent_chat.backend.agent.stream import (
     _accumulate_usage,
     _detect_subagent_completions,
     _detect_subagent_starts,
-    _extract_text_and_reasoning,
     _filter_main_agent_messages,
     _handle_subagent_call,
     _iter_node_messages,
@@ -73,103 +72,6 @@ def test_to_virtual_path_with_dbfs_prefix():
 def test_to_virtual_path_root_file():
     result = to_virtual_path("/Volumes/cat/schema/vol", "/Volumes/cat/schema/vol/top.md")
     assert result == "/top.md"
-
-
-# ─── _extract_text_and_reasoning ────────────────────────────────────────────────────
-
-
-def test_extract_text_plain_string():
-    text, reasoning = _extract_text_and_reasoning("hello world")
-    assert text == "hello world"
-    assert reasoning == ""
-
-
-def test_extract_text_list_with_text_block():
-    text, reasoning = _extract_text_and_reasoning('[{"type": "text", "text": "hello"}]')
-    assert text == "hello"
-    assert reasoning == ""
-
-
-def test_extract_text_list_multiple_blocks():
-    payload = '[{"type": "text", "text": "hello"}, {"type": "thought", "text": "ignored"}, {"type": "text", "text": " world"}]'
-    text, reasoning = _extract_text_and_reasoning(payload)
-    assert text == "hello world"
-
-
-def test_extract_text_invalid_json():
-    raw = '[{ invalid json'
-    text, reasoning = _extract_text_and_reasoning(raw)
-    assert text == raw
-    assert reasoning == ""
-
-
-def test_extract_text_python_list():
-    text, reasoning = _extract_text_and_reasoning([{"type": "text", "text": "from list"}])
-    assert text == "from list"
-    assert reasoning == ""
-
-
-def test_extract_text_python_list_mixed():
-    text, reasoning = _extract_text_and_reasoning(["plain string", {"type": "text", "text": " appended"}])
-    assert text == "plain string appended"
-    assert reasoning == ""
-
-
-def test_extract_text_non_string_non_list():
-    text, reasoning = _extract_text_and_reasoning(42)
-    assert text == "42"
-    assert reasoning == ""
-
-
-def test_extract_reasoning_gpt_oss_120b():
-    payload = '[{"type": "reasoning", "summary": [{"type": "summary_text", "text": "thinking..."}]}]'
-    text, reasoning = _extract_text_and_reasoning(payload)
-    assert text == ""
-    assert reasoning == "thinking..."
-
-
-def test_extract_reasoning_thought_type():
-    payload = '[{"type": "thought", "content": "thought content..."}]'
-    text, reasoning = _extract_text_and_reasoning(payload)
-    assert text == ""
-    assert reasoning == "thought content..."
-
-
-def test_extract_text_with_thought_signature():
-    payload = '[{"type": "text", "text": "hello", "thoughtSignature": "signature..."}]'
-    text, reasoning = _extract_text_and_reasoning(payload)
-    assert text == "hello"
-    assert reasoning == "signature..."
-
-
-def test_extract_text_with_thinking_tag():
-    text, reasoning = _extract_text_and_reasoning("Prefix <thinking>thinking process</thinking> suffix")
-    assert "Prefix" in text
-    assert "suffix" in text
-    assert "thinking" not in text
-    assert "thinking process" in reasoning
-
-
-def test_extract_text_with_think_tag():
-    text, reasoning = _extract_text_and_reasoning("Response <think>some thought</think> end")
-    assert "Response" in text
-    assert "end" in text
-    assert "think" not in text.lower()
-    assert "some thought" in reasoning
-
-
-def test_extract_mixed_json():
-    payload = '[{"type": "text", "text": "Hello"}, {"type": "reasoning", "summary": [{"type": "summary_text", "text": "thinking"}]}, {"type": "text", "text": " world"}]'
-    text, reasoning = _extract_text_and_reasoning(payload)
-    assert text == "Hello world"
-    assert reasoning == "thinking"
-
-
-def test_extract_python_list_with_reasoning():
-    blocks = [{"type": "text", "text": "hello"}, {"type": "thought", "content": "reasoning..."}, {"type": "text", "text": " world"}]
-    text, reasoning = _extract_text_and_reasoning(blocks)
-    assert text == "hello world"
-    assert reasoning == "reasoning..."
 
 
 # ─── _log_and_yield ───────────────────────────────────────────────────────────

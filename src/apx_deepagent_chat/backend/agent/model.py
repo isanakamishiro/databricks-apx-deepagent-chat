@@ -1,12 +1,15 @@
 import functools
+import logging
 import os
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import yaml
 from databricks.sdk import WorkspaceClient
-from databricks_langchain import ChatDatabricks
+from databricks_langchain.utils import get_async_openai_client, get_openai_client
+from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.model_profile import ModelProfile
+from langchain_openai.chat_models.base import BaseChatOpenAI
 
 from .clients import get_sp_workspace_client
 
@@ -14,7 +17,8 @@ ASSETS_DIR = Path(__file__).parent.parent.parent / "assets"
 
 USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
 FAKE_MODEL_NAME = "_fake-model-for-testing"
-DEFAULT_MODEL_PARAMS = {"temperature": 0}
+DEFAULT_MODEL_PARAMS: dict[str, Any] = {"temperature": 0.0}
+logger = logging.getLogger(__name__)
 
 
 @functools.cache
@@ -38,24 +42,29 @@ def _make_fake_model():
     return ToolCapableFakeModel(responses=[FAKE_RESPONSE] * 20)
 
 
-def init_model(
-    model_name: str, ws: Optional[WorkspaceClient] = None
-) -> Union[ChatDatabricks, Any]:
+def init_model(model_name: str, ws: Optional[WorkspaceClient] = None) -> BaseChatModel:
     if model_name == FAKE_MODEL_NAME:
         return _make_fake_model()
 
     model_config = load_models_config().get(model_name, {})
     model_params = model_config.get("params", {})
     params = {**DEFAULT_MODEL_PARAMS, **model_params}
+    logger.info(f"Initializing model {model_name} with params: {params}")
 
     ws_client = ws or get_sp_workspace_client()
-    model = ChatDatabricks(
-        model=model_name,
-        workspace_client=ws_client,
-        use_responses_api=False,
+    sync_client = get_openai_client(workspace_client=ws_client)
+    async_client = get_async_openai_client(workspace_client=ws_client)
+
+    # root_client と client を両方渡すことで内部の client 再生成をスキップする
+    model = BaseChatOpenAI(
+        model=model_name,  # type: ignore[unknown-argument]
+        root_client=sync_client,
+        root_async_client=async_client,
+        client=sync_client.chat.completions,
+        async_client=async_client.chat.completions,
         **params,
     )
-    if not model.profile:
+    if not getattr(model, "profile", None):
         model.profile = ModelProfile(
             **model_config.get(
                 "profile",
@@ -71,5 +80,7 @@ def init_model(
             )
         )
     if "max_tokens" not in model_params:
-        model.max_tokens = model.profile.get("max_output_tokens")
+        profile = getattr(model, "profile", None)
+        if profile is not None:
+            model.max_tokens = profile.get("max_output_tokens")
     return model

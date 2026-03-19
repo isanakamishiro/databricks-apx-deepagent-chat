@@ -40,11 +40,11 @@ USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
 VOLUME_PATH = os.getenv("TEST_VOLUME_PATH", "")
 
 TEST_CASES = [
-    # {
-    #     "name": "Skill実行",
-    #     "message": "Databricksについて調査して",
-    #     "thread_id": "test-000",
-    # },
+    {
+        "name": "Skill実行",
+        "message": "Databricksについて調査して",
+        "thread_id": "test-000",
+    },
     # {
     #     "name": "基本的な質問",
     #     "message": "今日の日付を必ずサブエージェントを使って確認してください",
@@ -56,15 +56,6 @@ TEST_CASES = [
     #     "thread_id": "test-002",
     # },
     # {
-    #     "name": "content-writer",
-    #     "message": "https://blog.langchain.com/autonomous-context-compression/ の内容を日本語に翻訳して記事化して",
-    #     "thread_id": "test-003",
-    # },
-    {
-        "name": "content-writer",
-        "message": "/qiita_articles/20260315_201728_autonomous-context-compression.md を使ってblog記事を作って",
-        "thread_id": "test-004",
-    },
 ]
 
 
