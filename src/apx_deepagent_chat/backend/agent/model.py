@@ -14,6 +14,7 @@ ASSETS_DIR = Path(__file__).parent.parent.parent / "assets"
 
 USE_FAKE_MODEL = os.getenv("USE_FAKE_MODEL", "false").lower() == "true"
 FAKE_MODEL_NAME = "_fake-model-for-testing"
+DEFAULT_MODEL_PARAMS = {"temperature": 0}
 
 
 @functools.cache
@@ -43,15 +44,18 @@ def init_model(
     if model_name == FAKE_MODEL_NAME:
         return _make_fake_model()
 
+    model_config = load_models_config().get(model_name, {})
+    model_params = model_config.get("params", {})
+    params = {**DEFAULT_MODEL_PARAMS, **model_params}
+
     ws_client = ws or get_sp_workspace_client()
     model = ChatDatabricks(
         model=model_name,
         workspace_client=ws_client,
-        temperature=0,
         use_responses_api=False,
+        **params,
     )
     if not model.profile:
-        model_config = load_models_config().get(model_name, {})
         model.profile = ModelProfile(
             **model_config.get(
                 "profile",
@@ -66,5 +70,6 @@ def init_model(
                 },
             )
         )
-    model.max_tokens = model.profile.get("max_output_tokens")
+    if "max_tokens" not in model_params:
+        model.max_tokens = model.profile.get("max_output_tokens")
     return model
