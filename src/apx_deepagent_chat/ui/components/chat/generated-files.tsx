@@ -2,7 +2,7 @@ import { Download, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 
-const PAGE_SIZE = 7;
+const PAGE_SIZE = 10;
 
 type GeneratedFilesProps = {
   files: string[];
@@ -37,7 +37,7 @@ export function GeneratedFiles({ files, volumePath }: GeneratedFilesProps) {
 
   const startIdx = (currentPage - 1) * PAGE_SIZE;
   const pageFiles = files.slice(startIdx, startIdx + PAGE_SIZE);
-  const showPaging = files.length >= 8;
+  const showPaging = files.length > PAGE_SIZE;
 
   return (
     <div className="rounded-lg border bg-muted/30 p-3">
