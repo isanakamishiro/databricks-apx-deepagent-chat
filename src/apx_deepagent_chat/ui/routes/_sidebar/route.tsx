@@ -204,7 +204,7 @@ function Layout() {
                 <SidebarMenuItem key={chat.id}>
                   <div
                     className={cn(
-                      "group w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm cursor-pointer",
+                      "group/chat-item w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm cursor-pointer",
                       activeThreadId === chat.id
                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                         : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -220,7 +220,7 @@ function Layout() {
                     <MessageSquare size={13} className="shrink-0" />
                     <span className="truncate flex-1">{chat.title}</span>
                     <button
-                      className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                      className="shrink-0 opacity-0 group-hover/chat-item:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
                       onClick={(e) => handleDeleteChat(chat.id, e)}
                       title="削除"
                     >

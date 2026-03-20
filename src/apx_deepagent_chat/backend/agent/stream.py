@@ -47,6 +47,14 @@ def _normalize_messages(msgs: list, ua: dict) -> None:
             msg.content = json.dumps(msg.content)
         if isinstance(msg, (AIMessage, AIMessageChunk)):
             _accumulate_usage(ua, msg)
+            # content がリスト（reasoning ブロック等）の場合は text ブロックのみ抽出して文字列化
+            if isinstance(msg.content, list):
+                text_parts = [
+                    block.get("text", "")
+                    for block in msg.content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ]
+                msg.content = "".join(text_parts)
 
 
 def _iter_node_messages(data: Any) -> Iterator[tuple[str, list]]:

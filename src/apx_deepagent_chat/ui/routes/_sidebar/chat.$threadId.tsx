@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SubAgentBlock, type SubAgentBlockData } from "@/components/chat/subagent-block";
 import { AlertCircle, Copy, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -60,8 +60,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { CheckIcon } from "lucide-react";
 import { VolumeExplorer } from "@/components/chat/volume-explorer";
-import { GeneratedFiles } from "@/components/chat/generated-files";
+import { InfoPanel } from "@/components/chat/info-panel";
+import { type AgentTodoItem, type AgentTodosGroup } from "@/components/chat/todo-panel";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Shimmer } from "@/components/ui/shimmer";
+import { getRandomWaitMessage } from "@/config/wait-messages";
 
 export const Route = createFileRoute("/_sidebar/chat/$threadId")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -87,9 +90,15 @@ type ToolCallBlock = {
 };
 
 // 実行順を保持するための統合ブロック型
+type TextBlock = {
+  type: "text";
+  content: string;
+};
+
 type ChatBlock =
   | (ToolCallBlock & { type: "tool" })
-  | (SubAgentBlockData & { type: "subagent" });
+  | (SubAgentBlockData & { type: "subagent" })
+  | TextBlock;
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -105,6 +114,22 @@ type ChatMessage = {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function parseTodos(args: string): AgentTodoItem[] {
+  try {
+    const parsed = JSON.parse(args);
+    const arr: Array<{ content?: string; status?: string }> = parsed.todos ?? [];
+    return arr
+      .map((t, i) => ({
+        id: String(i),
+        content: String(t.content ?? ""),
+        status: (t.status as AgentTodoItem["status"]) ?? "pending",
+      }))
+      .filter((t) => t.content.length > 0);
+  } catch {
+    return [];
+  }
+}
 
 const FILE_WRITE_TOOL_NAMES = new Set(["write_file", "edit_file"]);
 
@@ -122,7 +147,7 @@ function extractWrittenFiles(message: ChatMessage): string[] {
             // ignore
           }
         }
-      } else {
+      } else if (block.type === "subagent") {
         for (const tc of block.toolCalls) {
           if (FILE_WRITE_TOOL_NAMES.has(tc.name) && tc.state === "output-available") {
             try {
@@ -430,9 +455,27 @@ function ChatPage() {
                       const updated = [...prev];
                       const last = updated[updated.length - 1];
                       if (last?.role === "assistant") {
+                        // blocks 配列を更新: 末尾の text ブロックに追記するか、新規作成
+                        const currentBlocks = last.blocks ?? [];
+                        const lastBlock = currentBlocks[currentBlocks.length - 1];
+                        let newBlocks: ChatBlock[];
+                        if (lastBlock?.type === "text") {
+                          // 末尾が text ブロックなら追記（ブロック数の爆発を防ぐ）
+                          newBlocks = [
+                            ...currentBlocks.slice(0, -1),
+                            { type: "text" as const, content: lastBlock.content + data.delta },
+                          ];
+                        } else {
+                          // 新しい text ブロックを追加
+                          newBlocks = [
+                            ...currentBlocks,
+                            { type: "text" as const, content: data.delta },
+                          ];
+                        }
                         updated[updated.length - 1] = {
                           ...last,
-                          content: (last.content ?? "") + data.delta,
+                          content: (last.content ?? "") + data.delta,  // コピー機能・後方互換のため維持
+                          blocks: newBlocks,
                         };
                       }
                       return updated;
@@ -718,7 +761,7 @@ function ChatPage() {
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
-          if (last?.role === "assistant" && !last.content && !last.toolCallBlocks?.length && !last.subAgentBlocks?.length) {
+          if (last?.role === "assistant" && !last.content && !last.blocks?.length && !last.toolCallBlocks?.length && !last.subAgentBlocks?.length) {
             return updated.slice(0, -1);
           }
           return updated;
@@ -815,6 +858,59 @@ function ChatContent({
   onModelChange,
 }: ChatContentProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const waitMessageRef = useRef<string>(getRandomWaitMessage());
+  const prevStreamingRef = useRef(false);
+
+  useEffect(() => {
+    if (streaming && !prevStreamingRef.current) {
+      waitMessageRef.current = getRandomWaitMessage();
+    }
+    prevStreamingRef.current = streaming;
+  }, [streaming]);
+
+  const allGeneratedFiles = useMemo(() => {
+    const seen = new Set<string>();
+    for (const msg of messages) {
+      if (msg.role === "assistant") {
+        for (const f of extractWrittenFiles(msg)) seen.add(f);
+      }
+    }
+    return Array.from(seen);
+  }, [messages]);
+
+  const agentTodosGroups = useMemo<AgentTodosGroup[]>(() => {
+    const groupMap = new Map<string, AgentTodosGroup>();
+
+    for (const msg of messages) {
+      if (!msg.blocks) continue;
+
+      for (const block of msg.blocks) {
+        if (block.type === "tool" && block.name === "write_todos") {
+          const todos = parseTodos(block.arguments);
+          if (todos.length > 0) {
+            groupMap.set("main", { agentId: "main", agentType: "Main Agent", todos });
+          }
+        }
+
+        if (block.type === "subagent") {
+          for (const tc of block.toolCalls) {
+            if (tc.name === "write_todos") {
+              const todos = parseTodos(tc.arguments);
+              if (todos.length > 0) {
+                groupMap.set(block.agentType, {
+                  agentId: block.callId,
+                  agentType: block.agentType,
+                  todos,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return Array.from(groupMap.values());
+  }, [messages]);
 
   const handleFormSubmit = ({ text }: { text: string; files: unknown[] }) => {
     onSubmit(text);
@@ -877,7 +973,8 @@ function ChatContent({
   );
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+    <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
       <Conversation className="flex-1">
         <ConversationContent className="max-w-2xl mx-auto w-full">
           {isLoadingHistory ? (
@@ -902,24 +999,99 @@ function ChatContent({
                 {msg.thinking && (
                   <Reasoning
                     isStreaming={streaming && isLast}
-                    defaultOpen={streaming && isLast}
+                    defaultOpen={false}
                   >
                     <ReasoningTrigger />
                     <ReasoningContent>{msg.thinking}</ReasoningContent>
                   </Reasoning>
                 )}
-                {(msg.blocks?.length || msg.subAgentBlocks?.length || msg.toolCallBlocks?.length) ? (
+                {msg.blocks && msg.blocks.length > 0 ? (
                   <div className="space-y-2 w-full">
-                    {msg.blocks
-                      ? msg.blocks.map((block, bi) => {
-                          if (block.type === "subagent") {
-                            return (
-                              <SubAgentBlock
-                                key={`sa-${bi}`}
-                                block={block}
+                    {msg.blocks.map((block, bi) => {
+                      if (block.type === "text") {
+                        return (
+                          <MessageContent key={`text-${bi}`}>
+                            <MessageResponse>{block.content}</MessageResponse>
+                          </MessageContent>
+                        );
+                      }
+                      if (block.type === "subagent") {
+                        return (
+                          <SubAgentBlock
+                            key={`sa-${bi}`}
+                            block={block}
+                          />
+                        );
+                      }
+                      // type === "tool"
+                      let parsedArgs: Record<string, unknown> = {};
+                      try {
+                        parsedArgs = JSON.parse(block.arguments || "{}");
+                      } catch {
+                        parsedArgs = { raw: block.arguments };
+                      }
+                      return (
+                        <Tool key={`t-${bi}`}>
+                          <ToolHeader
+                            title={block.name}
+                            type="tool-call"
+                            state={block.state}
+                          />
+                          <ToolContent>
+                            <ToolInput input={parsedArgs} />
+                            {block.result !== undefined && (
+                              <ToolOutput
+                                output={block.result}
+                                errorText={
+                                  block.state === "output-error"
+                                    ? block.result
+                                    : undefined
+                                }
                               />
-                            );
-                          }
+                            )}
+                          </ToolContent>
+                        </Tool>
+                      );
+                    })}
+                    {/* ストリーミング中: blocks があるが末尾が text でない場合にスケルトン表示 */}
+                    {streaming && isLast && msg.role === "assistant" &&
+                      msg.blocks[msg.blocks.length - 1]?.type !== "text" && (
+                      <MessageContent>
+                        <div className="py-1">
+                          <Shimmer className="text-sm" duration={1.5}>
+                            {waitMessageRef.current}
+                          </Shimmer>
+                        </div>
+                      </MessageContent>
+                    )}
+                    {/* blocks 内に text ブロックがない場合は msg.content をフォールバック表示（移行期の旧データ対応） */}
+                    {!msg.blocks.some(b => b.type === "text") && msg.content && (
+                      <MessageContent>
+                        <MessageResponse>{msg.content}</MessageResponse>
+                      </MessageContent>
+                    )}
+                    {/* エラー表示 */}
+                    {msg.isError && (
+                      <MessageContent>
+                        <Alert variant="destructive" className="w-full">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription>{msg.content}</AlertDescription>
+                        </Alert>
+                      </MessageContent>
+                    )}
+                  </div>
+                ) : (
+                  // 後方互換: blocks フィールドのない旧保存データ用フォールバック
+                  <>
+                    {(msg.subAgentBlocks?.length || msg.toolCallBlocks?.length) ? (
+                      <div className="space-y-2 w-full">
+                        {msg.subAgentBlocks?.map((block, bi) => (
+                          <SubAgentBlock
+                            key={`sa-${bi}`}
+                            block={block}
+                          />
+                        ))}
+                        {msg.toolCallBlocks?.map((block, bi) => {
                           let parsedArgs: Record<string, unknown> = {};
                           try {
                             parsedArgs = JSON.parse(block.arguments || "{}");
@@ -948,73 +1120,27 @@ function ChatContent({
                               </ToolContent>
                             </Tool>
                           );
-                        })
-                      : (
-                        // 後方互換: blocks フィールドのない旧保存データ用フォールバック
-                        <>
-                          {msg.subAgentBlocks?.map((block, bi) => (
-                            <SubAgentBlock
-                              key={`sa-${bi}`}
-                              block={block}
-                            />
-                          ))}
-                          {msg.toolCallBlocks?.map((block, bi) => {
-                            let parsedArgs: Record<string, unknown> = {};
-                            try {
-                              parsedArgs = JSON.parse(block.arguments || "{}");
-                            } catch {
-                              parsedArgs = { raw: block.arguments };
-                            }
-                            return (
-                              <Tool key={`t-${bi}`}>
-                                <ToolHeader
-                                  title={block.name}
-                                  type="tool-call"
-                                  state={block.state}
-                                />
-                                <ToolContent>
-                                  <ToolInput input={parsedArgs} />
-                                  {block.result !== undefined && (
-                                    <ToolOutput
-                                      output={block.result}
-                                      errorText={
-                                        block.state === "output-error"
-                                          ? block.result
-                                          : undefined
-                                      }
-                                    />
-                                  )}
-                                </ToolContent>
-                              </Tool>
-                            );
-                          })}
-                        </>
-                      )
-                    }
-                  </div>
-                ) : null}
-                <MessageContent>
-                  {msg.isError ? (
-                    <Alert variant="destructive" className="w-full">
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertDescription>{msg.content}</AlertDescription>
-                    </Alert>
-                  ) : msg.role === "assistant" && !msg.content && streaming && isLast ? (
-                    <div className="space-y-2 py-1">
-                      <Skeleton className="h-3 w-48" />
-                      <Skeleton className="h-3 w-64" />
-                      <Skeleton className="h-3 w-40" />
-                    </div>
-                  ) : (
-                    <MessageResponse>{msg.content}</MessageResponse>
-                  )}
-                </MessageContent>
-                {msg.role === "assistant" && !streaming && (() => {
-                  const files = extractWrittenFiles(msg);
-                  return files.length > 0 ? (
-                    <GeneratedFiles files={files} volumePath={volumePath} />
-                  ) : null;
-                })()}
+                        })}
+                      </div>
+                    ) : null}
+                    <MessageContent>
+                      {msg.isError ? (
+                        <Alert variant="destructive" className="w-full">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription>{msg.content}</AlertDescription>
+                        </Alert>
+                      ) : msg.role === "assistant" && !msg.content && streaming && isLast ? (
+                        <div className="py-1">
+                          <Shimmer className="text-sm" duration={1.5}>
+                            {waitMessageRef.current}
+                          </Shimmer>
+                        </div>
+                      ) : (
+                        <MessageResponse>{msg.content}</MessageResponse>
+                      )}
+                    </MessageContent>
+                  </>
+                )}
                 {msg.role === "assistant" && !streaming && msg.content && (
                   <div className="flex flex-col items-start gap-1">
                     <div className="flex items-center gap-2">
@@ -1071,11 +1197,18 @@ function ChatContent({
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
+      <InfoPanel
+        files={allGeneratedFiles}
+        volumePath={volumePath}
+        todoGroups={agentTodosGroups}
+      />
       <div className="shrink-0 border-t p-4">
         <div className="max-w-2xl mx-auto">
           {promptInput}
         </div>
       </div>
+      </div>
+
     </div>
   );
 }
