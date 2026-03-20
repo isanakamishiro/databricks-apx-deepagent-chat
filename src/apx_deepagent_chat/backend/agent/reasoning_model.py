@@ -4,6 +4,11 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_openai.chat_models.base import BaseChatOpenAI
 
 
+def _strip_index(block: dict) -> dict:
+    """merge_lists() 用の内部フィールド "index" を除去する."""
+    return {k: v for k, v in block.items() if k != "index"}
+
+
 class ChatOpenAIWithReasoning(BaseChatOpenAI):
     """reasoning/reasoning_content をコンテンツブロックとして注入する BaseChatOpenAI サブクラス.
 
@@ -65,9 +70,15 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
                     continue
             if isinstance(block, dict):
                 # "index" フィールドを除去（merge_lists() 用の内部フィールド）
-                block = {k: v for k, v in block.items() if k != "index"}
+                block = _strip_index(block)
                 block_type = block.get("type")
-                key = "reasoning" if block_type == "reasoning" else "text" if block_type == "text" else None
+                key = (
+                    "reasoning"
+                    if block_type == "reasoning"
+                    else "text"
+                    if block_type == "text"
+                    else None
+                )
                 if (
                     key
                     and normalized
@@ -76,27 +87,25 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
                     and key in block
                 ):
                     # 連続する同一 type ブロックを統合
-                    normalized[-1] = {**normalized[-1], key: normalized[-1][key] + block[key]}
+                    normalized[-1] = {
+                        **normalized[-1],
+                        key: normalized[-1][key] + block[key],
+                    }
                 else:
                     normalized.append(block)
         return normalized
 
     def _normalize_result(self, result: ChatResult) -> ChatResult:
         """ChatResult の全 generation の content を _normalize_content() で正規化する."""
-        new_generations = []
-        changed = False
-        for gen in result.generations:
-            normalized = self._normalize_content(gen.message.content)
-            if normalized != gen.message.content:
-                new_msg = gen.message.model_copy(update={"content": normalized})
-                new_generations.append(
-                    ChatGeneration(message=new_msg, generation_info=gen.generation_info)
-                )
-                changed = True
-            else:
-                new_generations.append(gen)
-        if changed:
-            result.generations = new_generations
+        result.generations = [
+            ChatGeneration(
+                message=gen.message.model_copy(
+                    update={"content": self._normalize_content(gen.message.content)}
+                ),
+                generation_info=gen.generation_info,
+            )
+            for gen in result.generations
+        ]
         return result
 
     # Overrides _generate_with_cache() / _agenerate_with_cache() to normalize content blocks
@@ -105,10 +114,14 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
     # - Streaming: generate_from_stream() → _generate_with_cache()
     # Previous _generate() / _agenerate() overrides were bypassed during streaming.
     def _generate_with_cache(self, messages, stop=None, run_manager=None, **kwargs):
-        result = super()._generate_with_cache(messages, stop=stop, run_manager=run_manager, **kwargs)
+        result = super()._generate_with_cache(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
         return self._normalize_result(result)
 
-    async def _agenerate_with_cache(self, messages, stop=None, run_manager=None, **kwargs):
+    async def _agenerate_with_cache(
+        self, messages, stop=None, run_manager=None, **kwargs
+    ):
         result = await super()._agenerate_with_cache(
             messages, stop=stop, run_manager=run_manager, **kwargs
         )
@@ -121,7 +134,9 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
     #
     # "index" is added to reasoning/text blocks so that LangChain's merge_lists()
     # merges same-index blocks during streaming accumulation (native deduplication).
-    def _convert_chunk_to_generation_chunk(self, chunk, default_chunk_class, base_generation_info):
+    def _convert_chunk_to_generation_chunk(
+        self, chunk, default_chunk_class, base_generation_info
+    ):
         """ストリーミング: reasoningブロックをコンテンツリストに注入."""
         gen_chunk = super()._convert_chunk_to_generation_chunk(
             chunk, default_chunk_class, base_generation_info
@@ -135,7 +150,11 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
 
         delta = choices[0].get("delta") or {}
         reasoning_text = self._extract_reasoning_text(delta)
-        text_content = gen_chunk.message.content if isinstance(gen_chunk.message.content, str) else ""
+        text_content = (
+            gen_chunk.message.content
+            if isinstance(gen_chunk.message.content, str)
+            else ""
+        )
 
         # reasoning も text も無ければ変換不要
         if not reasoning_text and not text_content:
@@ -144,12 +163,22 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
         blocks: list = []
         if reasoning_text:
             # "index": 0 により merge_lists() が同一チャンクをネイティブに統合する
-            blocks.append({"type": "reasoning", "reasoning": reasoning_text, "index": 0})
+            blocks.append(
+                {"type": "reasoning", "reasoning": reasoning_text, "index": 0}
+            )
         if text_content:
             # "index": 1 により merge_lists() が同一チャンクをネイティブに統合する
             blocks.append({"type": "text", "text": text_content, "index": 1})
 
-        new_msg = gen_chunk.message.model_copy(update={"content": blocks})
+        new_msg = gen_chunk.message.model_copy(
+            update={
+                "content": blocks,
+                "response_metadata": {
+                    **gen_chunk.message.response_metadata,
+                    "output_version": "v1",
+                },
+            }
+        )
         return ChatGenerationChunk(
             message=new_msg,
             generation_info=gen_chunk.generation_info,
@@ -182,12 +211,7 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
             message_dict = choices[i].get("message") or {}
             reasoning_text = self._extract_reasoning_text(message_dict)
             if not reasoning_text:
-                normalized = self._normalize_content(gen.message.content)
-                if normalized != gen.message.content:
-                    new_msg = gen.message.model_copy(update={"content": normalized})
-                    new_generations.append(ChatGeneration(message=new_msg, generation_info=gen.generation_info))
-                else:
-                    new_generations.append(gen)
+                new_generations.append(gen)
                 continue
 
             blocks = self._build_content_blocks(reasoning_text, gen.message.content)
@@ -202,7 +226,9 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
 
     # Stable override as of langchain-openai==0.3.x — review on major version bumps.
     # AzureChatOpenAI uses the same pattern — effectively an official override point.
-    def _get_request_payload(self, input_: Any, *, stop: list[str] | None = None, **kwargs: Any) -> dict:
+    def _get_request_payload(
+        self, input_: Any, *, stop: list[str] | None = None, **kwargs: Any
+    ) -> dict:
         """リクエスト送信前に、コンテンツリスト内の文字列項目と "index" フィールドを正規化する。
 
         ストリーミング時に reasoning ブロック（list）とテキストチャンク（str）が混在し、
@@ -225,7 +251,7 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
                         # 空文字列 → 除去
                     elif isinstance(block, dict):
                         # "index" フィールドを除去してから送信
-                        clean_block = {k: v for k, v in block.items() if k != "index"}
+                        clean_block = _strip_index(block)
                         if clean_block:
                             clean_blocks.append(clean_block)
                 msg = {**msg, "content": clean_blocks if clean_blocks else ""}

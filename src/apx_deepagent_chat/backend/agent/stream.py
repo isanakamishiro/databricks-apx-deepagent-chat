@@ -142,12 +142,25 @@ def _process_main_agent_messages(
         if not isinstance(chunk, AIMessageChunk):
             return
         blocks = chunk.content_blocks
+
+        # 計測点 C: AIMessageChunk の content_blocks の内容を記録
+        logger.debug(
+            "[msg-chunk] id=%s output_version=%s n_blocks=%d "
+            "block_types=%s reasoning_total=%d text_total=%d",
+            chunk.id,
+            chunk.response_metadata.get("output_version"),
+            len(blocks),
+            [b.get("type") for b in blocks if isinstance(b, dict)],
+            sum(len(b.get("reasoning", "")) for b in blocks if isinstance(b, dict) and b.get("type") == "reasoning"),
+            sum(len(b.get("text", "")) for b in blocks if isinstance(b, dict) and b.get("type") == "text"),
+        )
+
         if not blocks:
             return
 
         item_id = chunk.id or str(uuid4())
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-        reasoning = " ".join(b.get("reasoning", "") for b in blocks if b.get("type") == "reasoning")
+        reasoning = "".join(b.get("reasoning", "") for b in blocks if b.get("type") == "reasoning")
 
         if text:
             state.accumulated_text += text

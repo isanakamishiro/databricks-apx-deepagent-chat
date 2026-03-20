@@ -78,8 +78,8 @@ models:
   ext-endpoint-middle:
     display_name: "Ext Middle LLM"
     params:
-      temperature: 0.60
-      top_p: 0.95
+      temperature: 1.0
+      top_p: 0.9
       extra_body: {"chat_template_kwargs": {"enable_thinking":True}}
     profile:
       max_input_tokens: 200000

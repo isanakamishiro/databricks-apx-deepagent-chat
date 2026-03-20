@@ -32,7 +32,7 @@ from .clients import get_sp_workspace_client, get_user_workspace_client
 from .lc_tools import get_current_time, web_fetch, web_search
 from .mcp_tools import get_mcp_tools
 from .middleware import flatten_system_message, strip_content_block_ids
-from .model import (
+from .model_loader import (
     ASSETS_DIR,
     FAKE_MODEL_NAME,
     USE_FAKE_MODEL,

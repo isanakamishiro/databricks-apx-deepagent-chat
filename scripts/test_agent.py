@@ -21,18 +21,23 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
+from pydantic import SecretStr
 
 from apx_deepagent_chat.backend.agent import init_agent, init_model
 from apx_deepagent_chat.backend.agent.clients import get_user_workspace_client
 from apx_deepagent_chat.backend.agent.core import _load_preset_files
-from apx_deepagent_chat.backend.agent.model import load_models_config
+from apx_deepagent_chat.backend.agent.model_loader import load_models_config
+from apx_deepagent_chat.backend.agent.reasoning_model import ChatOpenAIWithReasoning
 from apx_deepagent_chat.backend.agent.stream import process_agent_astream_events
 
 # プロジェクトの src ディレクトリを Python パスに追加
 # sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 load_dotenv(Path(__file__).parent.parent / ".env")
 
+# opentelemetry.attributes の警告（WARNING）を抑制
+logging.getLogger("opentelemetry.attributes").setLevel(logging.ERROR)
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
+logging.getLogger("mlflow.tracing.export.async_export_queue").setLevel(logging.ERROR)
 
 # --- 設定 ---
 
@@ -59,6 +64,44 @@ TEST_CASES = [
 ]
 
 
+async def run_test_chatmodel():
+
+    from langchain.agents import create_agent
+
+    model_name = os.environ.get("REASONING_MODEL", "ext-endpoint-middle")
+    api_base = os.environ.get("OPENAI_API_BASE", "")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+
+    if not api_base or not api_key:
+        print("環境変数 OPENAI_API_BASE / OPENAI_API_KEY を設定してください")
+        sys.exit(1)
+
+    model = ChatOpenAIWithReasoning(
+        model=model_name,  # type: ignore[unknown-argument]
+        base_url=api_base,  # type: ignore[unknown-argument]
+        api_key=SecretStr(api_key),  # type: ignore[unknown-argument]
+        streaming=True,
+        max_tokens=2048,
+        temperature=1.0,
+        top_p=0.9,
+    )
+
+    agent = create_agent(
+        model=model,
+        tools=[],
+    )
+
+    resp = agent.invoke(
+        {"messages": [HumanMessage(content="9.11 or 9.8、どちらが大きい?")]},
+    )
+
+    from pprint import pprint
+
+    messages = resp.get("messages", [])
+    for msg in messages:
+        pprint(msg.content_blocks)
+
+
 def _make_fake_model():
     """FakeListChatModel を構築して返す.
 
@@ -80,38 +123,6 @@ def _make_fake_model():
             return self
 
     return ToolCapableFakeModel(responses=responses)
-
-
-async def run_test_chatmodel():
-
-    from databricks_langchain import ChatDatabricks
-    from deepagents import create_deep_agent
-
-    model = ChatDatabricks(
-        model="databricks-gpt-oss-120b",
-        temperature=0,
-        use_responses_api=False,
-    )
-    model.profile = {
-        "max_input_tokens": 200000,
-        "max_output_tokens": 10000,
-        "text_inputs": True,
-        "tool_choice": True,
-        "tool_calling": True,
-        "structured_output": True,
-        "text_outputs": True,
-    }
-    agent = create_deep_agent(model=model, tools=[])
-    # async for c in model.astream("hello"):
-    #     print(c)
-    async for chunk in agent.astream(
-        input={"messages": [HumanMessage(content="今日の日付を教えてください")]},
-        config={"configurable": {"thread_id": "test-chatmodel-001"}},
-        stream_mode=["updates", "messages"],
-        subgraphs=True,
-        version="v2",
-    ):
-        print(f"Chunk: {chunk}")
 
 
 async def run_test_case(
@@ -259,3 +270,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+    # asyncio.run(run_test_chatmodel())
