@@ -16,8 +16,14 @@ export interface Body_filesUpload {
     file: string;
     path: string;
 }
+export interface Body_filesUploadAttachment {
+    file: string;
+}
 export interface CatalogOut {
     name: string;
+}
+export interface ChatInterruptResponse {
+    ok: boolean;
 }
 export interface ChatStartResponse {
     job_id: string;
@@ -52,6 +58,10 @@ export interface SaveMessagesRequest {
 }
 export interface SchemaOut {
     name: string;
+}
+export interface UploadAttachmentResponse {
+    ok: boolean;
+    path: string;
 }
 export interface User {
     active?: boolean | null;
@@ -632,6 +642,42 @@ export function useSaveMessages(options?: {
 }) {
     return useMutation({
         mutationFn: (vars)=>saveMessages(vars.params, vars.data),
+        ...options?.mutation
+    });
+}
+export interface ChatInterruptParams {
+    job_id: string;
+}
+export const chatInterrupt = async (params: ChatInterruptParams, options?: RequestInit): Promise<{
+    data: ChatInterruptResponse;
+}> =>{
+    const res = await fetch(`/api/chat/interrupt/${params.job_id}`, {
+        ...options,
+        method: "POST"
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export function useChatInterrupt(options?: {
+    mutation?: UseMutationOptions<{
+        data: ChatInterruptResponse;
+    }, ApiError, {
+        params: ChatInterruptParams;
+    }>;
+}) {
+    return useMutation({
+        mutationFn: (vars)=>chatInterrupt(vars.params),
         ...options?.mutation
     });
 }
@@ -1284,6 +1330,74 @@ export function useFilesUpload(options?: {
 }) {
     return useMutation({
         mutationFn: (vars)=>filesUpload(vars.data, vars.params),
+        ...options?.mutation
+    });
+}
+export interface FilesUploadAttachmentParams {
+    "x-uc-volume-path"?: string | null;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const filesUploadAttachment = async (data: FormData, params?: FilesUploadAttachmentParams, options?: RequestInit): Promise<{
+    data: UploadAttachmentResponse;
+}> =>{
+    const res = await fetch("/api/files/upload-attachment", {
+        ...options,
+        method: "POST",
+        headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        },
+        body: data
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export function useFilesUploadAttachment(options?: {
+    mutation?: UseMutationOptions<{
+        data: UploadAttachmentResponse;
+    }, ApiError, {
+        params: FilesUploadAttachmentParams;
+        data: FormData;
+    }>;
+}) {
+    return useMutation({
+        mutationFn: (vars)=>filesUploadAttachment(vars.data, vars.params),
         ...options?.mutation
     });
 }
