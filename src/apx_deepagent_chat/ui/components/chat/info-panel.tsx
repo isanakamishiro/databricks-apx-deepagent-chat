@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, CheckSquare, ChevronDown, ChevronUp } from "lucide-react";
+import { FileText, CheckSquare, ChevronDown, ChevronUp, Clock, X } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,18 +16,21 @@ type InfoPanelProps = {
   files: string[];
   volumePath: string;
   todoGroups: AgentTodosGroup[];
+  messageQueue: string[];
+  onRemoveQueueItem: (index: number) => void;
 };
 
-export function InfoPanel({ files, volumePath, todoGroups }: InfoPanelProps) {
+export function InfoPanel({ files, volumePath, todoGroups, messageQueue, onRemoveQueueItem }: InfoPanelProps) {
   const [height, setHeight] = useState(200);
   const [isVisible, setIsVisible] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<"files" | "tasks">("files");
+  const [activeTab, setActiveTab] = useState<"files" | "tasks" | "queue">("files");
   const [isDragging, setIsDragging] = useState(false);
   const dragStartYRef = useRef(0);
   const dragStartHeightRef = useRef(200);
   const prevFilesLengthRef = useRef(0);
   const prevTodosCountRef = useRef(0);
+  const prevQueueLengthRef = useRef(0);
 
   const totalTodosCount = todoGroups.reduce((s, g) => s + g.todos.length, 0);
 
@@ -35,19 +38,28 @@ export function InfoPanel({ files, volumePath, todoGroups }: InfoPanelProps) {
   useEffect(() => {
     const filesAdded = files.length > prevFilesLengthRef.current;
     const todosAdded = totalTodosCount > prevTodosCountRef.current;
+    const queueAdded = messageQueue.length > prevQueueLengthRef.current;
     prevFilesLengthRef.current = files.length;
     prevTodosCountRef.current = totalTodosCount;
+    prevQueueLengthRef.current = messageQueue.length;
 
-    if (filesAdded || todosAdded) {
+    if (filesAdded || todosAdded || queueAdded) {
       setIsVisible(true);
       setIsCollapsed(false);
-      if (filesAdded) setActiveTab("files");
+      if (queueAdded) setActiveTab("queue");
+      else if (filesAdded) setActiveTab("files");
       else setActiveTab("tasks");
     }
-    if (files.length === 0 && totalTodosCount === 0) {
+    if (files.length === 0 && totalTodosCount === 0 && messageQueue.length === 0) {
       setIsVisible(false);
     }
-  }, [files.length, totalTodosCount]);
+    // キューが空になったら queue タブから他のタブへ切り替え
+    if (messageQueue.length === 0 && activeTab === "queue") {
+      if (files.length > 0) setActiveTab("files");
+      else if (totalTodosCount > 0) setActiveTab("tasks");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files.length, totalTodosCount, messageQueue.length]);
 
   // ドラッグリサイズ
   const handleDragMouseDown = (e: React.MouseEvent) => {
@@ -97,7 +109,7 @@ export function InfoPanel({ files, volumePath, todoGroups }: InfoPanelProps) {
         />
       )}
       {/* タブUI */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "files" | "tasks")} className="flex flex-col h-full">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "files" | "tasks" | "queue")} className="flex flex-col h-full">
         <div className="flex items-center px-3 border-b" style={{ height: `${TAB_HEADER_HEIGHT}px` }}>
           <TabsList className="h-7 bg-transparent p-0 gap-1">
             <TabsTrigger
@@ -120,6 +132,16 @@ export function InfoPanel({ files, volumePath, todoGroups }: InfoPanelProps) {
                 <Badge variant="secondary" className="ml-1 text-xs h-4 px-1 min-w-4">{totalTodosCount}</Badge>
               )}
             </TabsTrigger>
+            {messageQueue.length > 0 && (
+              <TabsTrigger
+                value="queue"
+                className="text-xs h-6 px-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
+              >
+                <Clock className="size-3 mr-1" />
+                待機中
+                <Badge variant="secondary" className="ml-1 text-xs h-4 px-1 min-w-4">{messageQueue.length}</Badge>
+              </TabsTrigger>
+            )}
           </TabsList>
           <Button
             variant="ghost"
@@ -143,6 +165,28 @@ export function InfoPanel({ files, volumePath, todoGroups }: InfoPanelProps) {
             </TabsContent>
             <TabsContent value="tasks" className="mt-0 h-full">
               <TodoPanel groups={todoGroups} />
+            </TabsContent>
+            <TabsContent value="queue" className="mt-0 p-3 h-full">
+              {messageQueue.length === 0 ? (
+                <p className="text-xs text-muted-foreground">待機中のメッセージはありません</p>
+              ) : (
+                <div className="space-y-2">
+                  {messageQueue.map((item, index) => (
+                    <div key={index} className="flex items-start gap-2 text-xs bg-muted/50 rounded px-2 py-1.5">
+                      <span className="flex-1 text-muted-foreground truncate">
+                        {item.slice(0, 50)}{item.length > 50 ? "…" : ""}
+                      </span>
+                      <button
+                        onClick={() => onRemoveQueueItem(index)}
+                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label="削除"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </TabsContent>
           </div>
         )}

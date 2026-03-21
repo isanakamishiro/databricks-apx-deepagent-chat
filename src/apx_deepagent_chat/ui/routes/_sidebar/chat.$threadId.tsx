@@ -232,6 +232,11 @@ function ChatPage() {
   const prevThreadIdRef = useRef<string | null>(null);
   messagesRef.current = messages;
 
+  const [messageQueue, setMessageQueue] = useState<string[]>([]);
+  const messageQueueRef = useRef<string[]>([]);
+  messageQueueRef.current = messageQueue;
+  const currentJobIdRef = useRef<string | null>(null);
+
   const [volumePath, setVolumePath] = useState(
     () => localStorage.getItem(STORAGE_KEY_VOLUME) ?? ""
   );
@@ -255,6 +260,9 @@ function ChatPage() {
       setMessages([]);
       initialQueryFiredRef.current = false;
       persistedCountRef.current = 0;
+      setMessageQueue([]);
+      messageQueueRef.current = [];
+      currentJobIdRef.current = null;
     }
 
     if (!userId) return;
@@ -323,6 +331,14 @@ function ChatPage() {
   }, []);
 
   const handleStop = () => {
+    if (messageQueue.length > 0) {
+      const confirmed = window.confirm(
+        `待機中のメッセージが ${messageQueue.length} 件あります。キャンセルすると待機中のメッセージも破棄されます。続行しますか？`
+      );
+      if (!confirmed) return;
+      setMessageQueue([]);
+      messageQueueRef.current = [];
+    }
     abortControllerRef.current?.abort();
     setStreaming(false);
   };
@@ -340,7 +356,18 @@ function ChatPage() {
 
   const handleSubmit = async (text: string) => {
     if (!text.trim()) return;
-    if (streaming || isLoadingHistory) return;
+    if (isLoadingHistory) return;
+
+    // ストリーミング中は queue に追加して割り込みをリクエスト
+    if (streaming) {
+      const isFirstQueued = messageQueueRef.current.length === 0;
+      setMessageQueue(prev => [...prev, text]);
+      messageQueueRef.current = [...messageQueueRef.current, text];
+      if (isFirstQueued && currentJobIdRef.current) {
+        fetch(`/api/chat/interrupt/${currentJobIdRef.current}`, { method: "POST" }).catch(() => {});
+      }
+      return;
+    }
 
     // 最初のメッセージ時にチャット履歴を保存
     if (messages.length === 0 && volumePath) {
@@ -397,13 +424,17 @@ function ChatPage() {
         throw new Error(`Failed to start job: ${startRes.status}`);
       }
 
-      const { job_id: jobId } = await startRes.json() as { job_id: string };
+      const { job_id: initialJobId } = await startRes.json() as { job_id: string };
+      let jobId = initialJobId;
+      currentJobIdRef.current = jobId;
 
       // Step 2: SSE で結果を受け取る（115秒ごとに自動再接続）
       let lastEventId = -1;
       let streamCompleted = false;
+      let shouldRestartStream = false;
 
       outerLoop: while (!streamCompleted) {
+        shouldRestartStream = false;
         if (ctrl.signal.aborted) break;
 
         const reconnectCtrl = new AbortController();
@@ -424,6 +455,7 @@ function ChatPage() {
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
+          let shouldBreakReader = false;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -708,6 +740,62 @@ function ChatPage() {
                       }
                       return updated;
                     });
+                  } else if (resolvedType === "stream.interrupted") {
+                    const queue = [...messageQueueRef.current];
+                    if (queue.length > 0) {
+                      setMessageQueue([]);
+                      messageQueueRef.current = [];
+                      const combinedText = queue.join("\n");
+
+                      // 新しいユーザーメッセージとアシスタントプレースホルダーを追加
+                      setMessages(prev => [
+                        ...prev,
+                        { role: "user" as const, content: combinedText },
+                        { role: "assistant" as const, content: "", blocks: [], toolCallBlocks: [] },
+                      ]);
+                      activeSubagentCallIdRef.current = null;
+
+                      // 新ジョブを開始
+                      if (!ctrl.signal.aborted) {
+                        try {
+                          const newStartRes = await fetch("/api/chat/start", {
+                            method: "POST",
+                            signal: ctrl.signal,
+                            headers: {
+                              "Content-Type": "application/json",
+                              ...(volumePath ? { "x-uc-volume-path": volumePath } : {}),
+                            },
+                            body: JSON.stringify({
+                              input: [{ role: "user", content: combinedText }],
+                              stream: true,
+                              custom_inputs: {
+                                volume_path: volumePath,
+                                llm_model: selectedModel,
+                                thread_id: threadId,
+                              },
+                            }),
+                          });
+                          if (newStartRes.ok) {
+                            const { job_id: newJobId } = await newStartRes.json() as { job_id: string };
+                            jobId = newJobId;
+                            currentJobIdRef.current = newJobId;
+                            lastEventId = -1;
+                            shouldRestartStream = true;
+                          } else {
+                            streamCompleted = true;
+                          }
+                        } catch {
+                          streamCompleted = true;
+                        }
+                      } else {
+                        streamCompleted = true;
+                      }
+                    } else {
+                      // キューが空 → ストリーム終了として扱う
+                      streamCompleted = true;
+                    }
+                    shouldBreakReader = true;
+                    break;
                   } else if (resolvedType === "error" && (data.error || data.message)) {
                     streamCompleted = true; // エラーもストリーム終了として扱う
                     setMessages((prev) => {
@@ -728,6 +816,7 @@ function ChatPage() {
                 }
               }
             }
+            if (shouldBreakReader) break;
           }
         } catch (e) {
           if (e instanceof Error && e.name === "AbortError") {
@@ -818,11 +907,15 @@ function ChatPage() {
         volumePath={volumePath}
         selectedModel={selectedModel}
         availableModels={availableModels}
+        messageQueue={messageQueue}
         onSubmit={handleSubmit}
         onStop={handleStop}
         onRetry={handleRetry}
         onVolumeSelect={handleVolumeSelect}
         onModelChange={handleModelChange}
+        onRemoveQueueItem={(index) => {
+          setMessageQueue(prev => prev.filter((_, i) => i !== index));
+        }}
       />
     </PromptInputProvider>
   );
@@ -837,11 +930,13 @@ type ChatContentProps = {
   volumePath: string;
   selectedModel: string;
   availableModels: {id: string; display_name: string}[];
+  messageQueue: string[];
   onSubmit: (text: string) => void;
   onStop: () => void;
   onRetry: () => void;
   onVolumeSelect: (vp: string) => void;
   onModelChange: (model: string) => void;
+  onRemoveQueueItem: (index: number) => void;
 };
 
 function ChatContent({
@@ -851,11 +946,13 @@ function ChatContent({
   volumePath,
   selectedModel,
   availableModels,
+  messageQueue,
   onSubmit,
   onStop,
   onRetry,
   onVolumeSelect,
   onModelChange,
+  onRemoveQueueItem,
 }: ChatContentProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const waitMessageRef = useRef<string>(getRandomWaitMessage());
@@ -920,8 +1017,10 @@ function ChatContent({
     <PromptInput onSubmit={handleFormSubmit}>
       <PromptInputBody>
         <PromptInputTextarea
-          placeholder="メッセージを入力... (Enter で送信、Shift+Enter で改行)"
-          disabled={streaming || isLoadingHistory}
+          placeholder={streaming
+            ? "メッセージをキューに追加... (Enter で送信)"
+            : "メッセージを入力... (Enter で送信、Shift+Enter で改行)"}
+          disabled={isLoadingHistory}
         />
       </PromptInputBody>
       <PromptInputFooter>
@@ -1201,6 +1300,8 @@ function ChatContent({
         files={allGeneratedFiles}
         volumePath={volumePath}
         todoGroups={agentTodosGroups}
+        messageQueue={messageQueue}
+        onRemoveQueueItem={onRemoveQueueItem}
       />
       <div className="shrink-0 border-t p-4">
         <div className="max-w-2xl mx-auto">
