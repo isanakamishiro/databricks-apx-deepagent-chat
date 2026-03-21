@@ -1,7 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SubAgentBlock, type SubAgentBlockData } from "@/components/chat/subagent-block";
-import { AlertCircle, Copy, RefreshCw } from "lucide-react";
+import { AlertCircle, Copy, RefreshCw, Paperclip } from "lucide-react";
+import { AttachmentPanel, type UploadedAttachment } from "@/components/chat/attachment-panel";
+import { nanoid } from "nanoid";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Message,
@@ -247,6 +249,16 @@ function ChatPage() {
 
   const userId = getOrCreateUserId();
 
+  const [uploadedAttachments, setUploadedAttachments] = useState<UploadedAttachment[]>([]);
+
+  const handleAttachmentAdd = (attachment: UploadedAttachment) => {
+    setUploadedAttachments((prev) => [...prev, attachment]);
+  };
+
+  const handleAttachmentRemove = (id: string) => {
+    setUploadedAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
+
   // threadId 変更時に履歴をロード
   useEffect(() => {
     // 本物のthreadId変更時のみリセット（StrictModeの二重実行を無視）
@@ -355,7 +367,7 @@ function ChatPage() {
   };
 
   const handleSubmit = async (text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() && uploadedAttachments.length === 0) return;
     if (isLoadingHistory) return;
 
     // ストリーミング中は queue に追加して割り込みをリクエスト
@@ -389,6 +401,17 @@ function ChatPage() {
         .catch(() => {});
     }
 
+    // APIに送信するテキスト（<files>ブロック付き）を構築
+    let apiText = text;
+    if (uploadedAttachments.length > 0) {
+      const paths = uploadedAttachments
+        .map((a) => `  <path>${a.virtualPath}</path>`)
+        .join("\n");
+      apiText = `${text}\n\n<files>\n${paths}\n</files>`;
+    }
+
+    setUploadedAttachments([]);
+
     setMessages((prev) => [
       ...prev,
       { role: "user", content: text },
@@ -410,7 +433,7 @@ function ChatPage() {
           ...(volumePath ? { "x-uc-volume-path": volumePath } : {}),
         },
         body: JSON.stringify({
-          input: [{ role: "user", content: text }],
+          input: [{ role: "user", content: apiText }],
           stream: true,
           custom_inputs: {
             volume_path: volumePath,
@@ -913,6 +936,9 @@ function ChatPage() {
         onRemoveQueueItem={(index) => {
           setMessageQueue(prev => prev.filter((_, i) => i !== index));
         }}
+        uploadedAttachments={uploadedAttachments}
+        onAttachmentAdd={handleAttachmentAdd}
+        onAttachmentRemove={handleAttachmentRemove}
       />
     </PromptInputProvider>
   );
@@ -934,6 +960,9 @@ type ChatContentProps = {
   onVolumeSelect: (vp: string) => void;
   onModelChange: (model: string) => void;
   onRemoveQueueItem: (index: number) => void;
+  uploadedAttachments: UploadedAttachment[];
+  onAttachmentAdd: (attachment: UploadedAttachment) => void;
+  onAttachmentRemove: (id: string) => void;
 };
 
 function ChatContent({
@@ -950,10 +979,56 @@ function ChatContent({
   onVolumeSelect,
   onModelChange,
   onRemoveQueueItem,
+  uploadedAttachments,
+  onAttachmentAdd,
+  onAttachmentRemove,
 }: ChatContentProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const waitMessageRef = useRef<string>(getRandomWaitMessage());
   const prevStreamingRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const ACCEPTED_EXTENSIONS = [
+    ".txt",".md",".html",".htm",".css",".py",".yaml",".yml",".json",".xml",".csv",
+    ".js",".ts",".tsx",".jsx",".sh",".sql",".toml",".ini",".conf",".log",".rst",
+    ".tex",".r",".rb",".java",".c",".cpp",".h",".go",".rs",".scala",".kt",".swift",
+    ".png",".jpg",".jpeg",".gif",".webp",
+  ].join(",");
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // input をリセット（同じファイルの再選択を可能にする）
+
+    for (const file of files) {
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch("/api/files/upload-attachment", {
+          method: "POST",
+          headers: volumePath ? { "x-uc-volume-path": volumePath } : {},
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          console.error("Upload failed:", err);
+          continue;
+        }
+
+        const { path } = (await res.json()) as { path: string };
+        onAttachmentAdd({
+          id: nanoid(),
+          filename: file.name,
+          virtualPath: path,
+          extension: ext,
+        });
+      } catch (err) {
+        console.error("Upload error:", err);
+      }
+    }
+  };
 
   useEffect(() => {
     if (streaming && !prevStreamingRef.current) {
@@ -1059,6 +1134,24 @@ function ChatContent({
             </ModelSelector>
           )}
           <VolumeExplorer value={volumePath} onSelect={onVolumeSelect} />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            type="button"
+            title="ファイルを添付"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip className="size-4" />
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept={ACCEPTED_EXTENSIONS}
+            multiple
+            onChange={handleFileChange}
+          />
         </PromptInputTools>
         <PromptInputSubmit
           status={streaming ? "streaming" : undefined}
@@ -1302,6 +1395,10 @@ function ChatContent({
       />
       <div className="shrink-0 border-t p-4">
         <div className="max-w-2xl mx-auto">
+          <AttachmentPanel
+            attachments={uploadedAttachments}
+            onRemove={onAttachmentRemove}
+          />
           {promptInput}
         </div>
       </div>
