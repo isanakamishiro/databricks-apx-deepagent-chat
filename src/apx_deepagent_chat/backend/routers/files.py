@@ -29,6 +29,7 @@ ALLOWED_EXTENSIONS = {
 }
 
 ATTACHMENT_UPLOAD_DIR = "/upload_files/"
+MAX_ATTACHMENT_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 def _delete_directory_recursive(w: WorkspaceClient, dir_path: str):
@@ -49,6 +50,11 @@ def _delete_directory_recursive(w: WorkspaceClient, dir_path: str):
 
 class MkdirRequest(BaseModel):
     path: str  # 作成先の仮想パス (例: "/reports/2024/")
+
+
+class UploadAttachmentResponse(BaseModel):
+    ok: bool
+    path: str
 
 
 @router.get("/files/list", operation_id="filesList")
@@ -138,22 +144,27 @@ async def files_upload(
     content = await file.read()
     try:
         ws.files.upload(real_path, io.BytesIO(content), overwrite=True)
-    except Exception as e:
+    except Exception:
         logger.exception("File upload failed for path: %s", real_path)
         raise HTTPException(status_code=500, detail="Upload failed")
 
     return {"ok": True, "path": virtual_path}
 
 
-@router.post("/files/upload-attachment", operation_id="filesUploadAttachment")
+@router.post("/files/upload-attachment", operation_id="filesUploadAttachment", response_model=UploadAttachmentResponse)
 async def files_upload_attachment(
     volume_path: Dependencies.VolumePath,
     ws: Dependencies.UserClient,
     file: UploadFile = File(...),
 ):
-    original_name = file.filename or "upload"
-    suffix = PurePosixPath(original_name).suffix.lower()
-    stem = PurePosixPath(original_name).stem
+    raw_name = file.filename or "upload"
+    # パストラバーサル防止: ディレクトリ成分を除いたベースファイル名のみ使用
+    parsed = PurePosixPath(PurePosixPath(raw_name).name)
+    original_name = parsed.name
+    if not original_name:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    suffix = parsed.suffix.lower()
+    stem = parsed.stem
 
     # ファイルタイプ検証
     if suffix not in ALLOWED_EXTENSIONS:
@@ -179,17 +190,22 @@ async def files_upload_attachment(
         unique_name = f"{stem}_{counter}{suffix}"
         counter += 1
 
-    virtual_path = ATTACHMENT_UPLOAD_DIR + unique_name
+    virtual_path = str(PurePosixPath(ATTACHMENT_UPLOAD_DIR) / unique_name)
     real_path = to_real_path(volume_path, virtual_path)
 
     content = await file.read()
+    if len(content) > MAX_ATTACHMENT_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_ATTACHMENT_SIZE_BYTES // (1024 * 1024)} MB.",
+        )
     try:
         ws.files.upload(real_path, io.BytesIO(content), overwrite=False)
     except Exception:
         logger.exception("Attachment upload failed for path: %s", real_path)
         raise HTTPException(status_code=500, detail="Upload failed")
 
-    return {"ok": True, "path": virtual_path}
+    return UploadAttachmentResponse(ok=True, path=virtual_path)
 
 
 @router.post("/files/mkdir", operation_id="filesMkdir")
@@ -202,7 +218,7 @@ async def files_mkdir(
     real_path = to_real_path(volume_path, dir_path)
     try:
         ws.files.create_directory(real_path)
-    except Exception as e:
+    except Exception:
         logger.exception("Directory creation failed for path: %s", real_path)
         raise HTTPException(status_code=500, detail="Failed to create directory")
     return {"ok": True, "path": dir_path}
@@ -223,7 +239,7 @@ async def files_delete(
             ws.files.delete(real_path)
     except (NotFound, ResourceDoesNotExist):
         raise HTTPException(status_code=404, detail="File or directory not found")
-    except Exception as e:
+    except Exception:
         logger.exception("Delete failed for path: %s", real_path)
         raise HTTPException(status_code=500, detail="Delete failed")
     return {"ok": True}
