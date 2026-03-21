@@ -449,17 +449,15 @@ async def process_agent_astream_events(
     )
 
     if interrupted:
-        # 割り込みによる停止: 部分応答を含む response.output_item.done のみ emit し、
-        # response.completed は発行しない。代わりに stream.interrupted を emit する。
+        # 割り込みによる停止: 部分応答を含む response.output_item.done のみ emit する。
+        # response.completed は発行しない（応答が不完全なため）。
+        # stream.interrupted も emit しない — フロントエンドは SSE クローズ（done=true）で
+        # Checkpoint 保存完了を検知してキュー処理を開始する。
         max_input_tokens = model_profile.get("max_input_tokens") if model_profile else None
         for item in _finalize_stream(state, _ua, model, max_input_tokens):
-            # response.completed は発行しない（stream.interrupted で代替）
             if item.type == "response.completed":
                 break
             yield item
-        yield _log_and_yield(
-            ResponsesAgentStreamEvent(type="stream.interrupted")
-        )
         return
 
     max_input_tokens = model_profile.get("max_input_tokens") if model_profile else None

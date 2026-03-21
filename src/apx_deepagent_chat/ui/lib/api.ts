@@ -647,11 +647,16 @@ export function useSaveMessages(options?: {
 }
 export interface ChatInterruptParams {
     job_id: string;
+    deep?: boolean;
 }
 export const chatInterrupt = async (params: ChatInterruptParams, options?: RequestInit): Promise<{
     data: ChatInterruptResponse;
 }> =>{
-    const res = await fetch(`/api/chat/interrupt/${params.job_id}`, {
+    const searchParams = new URLSearchParams();
+    if (params?.deep != null) searchParams.set("deep", String(params?.deep));
+    const queryString = searchParams.toString();
+    const url = queryString ? `/api/chat/interrupt/${params.job_id}?${queryString}` : `/api/chat/interrupt/${params.job_id}`;
+    const res = await fetch(url, {
         ...options,
         method: "POST"
     });

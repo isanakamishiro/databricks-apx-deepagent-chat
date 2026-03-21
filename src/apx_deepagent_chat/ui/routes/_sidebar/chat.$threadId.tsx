@@ -242,6 +242,7 @@ function ChatPage() {
   const messageQueueRef = useRef<string[]>([]);
   messageQueueRef.current = messageQueue;
   const currentJobIdRef = useRef<string | null>(null);
+  const [stopping, setStopping] = useState(false);
 
   const [volumePath, setVolumePath] = useState(
     () => localStorage.getItem(STORAGE_KEY_VOLUME) ?? ""
@@ -276,9 +277,18 @@ function ChatPage() {
     prevThreadIdRef.current = threadId;
 
     if (isNewThread) {
+      // currentJobIdRef をクリアする前に interrupt を呼ぶ（スレッド切り替え時）
+      const jobId = currentJobIdRef.current;
+      if (jobId) {
+        fetch(`/api/chat/interrupt/${jobId}?deep=true`, {
+          method: "POST",
+          keepalive: true,
+        }).catch(() => {});
+      }
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       setStreaming(false);
+      setStopping(false);
       setMessages([]);
       initialQueryFiredRef.current = false;
       persistedCountRef.current = 0;
@@ -335,6 +345,23 @@ function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streaming]);
 
+  // コンポーネント unmount 時のクリーンアップ（ルート離脱時）
+  // NOTE: abort() は呼ばない。React 18 Strict Mode はマウント後すぐにクリーンアップを
+  //       実行するため、initialQuery で開始したストリームの AbortController を誤って
+  //       abort してしまう。interrupt API (keepalive) だけ呼ぶことで、
+  //       Strict Mode フェイクアンマウント時は currentJobIdRef.current が null なので安全。
+  useEffect(() => {
+    return () => {
+      const jobId = currentJobIdRef.current;
+      if (jobId) {
+        fetch(`/api/chat/interrupt/${jobId}?deep=true`, {
+          method: "POST",
+          keepalive: true,
+        }).catch(() => {});
+      }
+    };
+  }, []); // 空依存配列 = unmount 時のみ実行
+
   // モデル一覧取得
   useEffect(() => {
     fetch("/api/config")
@@ -361,8 +388,10 @@ function ChatPage() {
       setMessageQueue([]);
       messageQueueRef.current = [];
     }
-    abortControllerRef.current?.abort();
-    setStreaming(false);
+    if (currentJobIdRef.current) {
+      fetch(`/api/chat/interrupt/${currentJobIdRef.current}?deep=true`, { method: "POST" }).catch(() => {});
+    }
+    setStopping(true);
   };
 
   const handleVolumeSelect = (vp: string) => {
@@ -494,7 +523,61 @@ function ChatPage() {
 
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done) {
+              // SSEクローズ = Checkpoint保存完了（mark_done後にクローズされる）
+              if (!streamCompleted) {
+                const queue = [...messageQueueRef.current];
+                if (queue.length > 0) {
+                  // メッセージキュー割り込みによる終了 → 新ジョブを開始
+                  setMessageQueue([]);
+                  messageQueueRef.current = [];
+                  const combinedText = queue.join("\n");
+                  setMessages(prev => [
+                    ...prev,
+                    { role: "user" as const, content: combinedText },
+                    { role: "assistant" as const, content: "", blocks: [], toolCallBlocks: [] },
+                  ]);
+                  activeSubagentCallIdRef.current = null;
+                  if (!ctrl.signal.aborted) {
+                    try {
+                      const newStartRes = await fetch("/api/chat/start", {
+                        method: "POST",
+                        signal: ctrl.signal,
+                        headers: {
+                          "Content-Type": "application/json",
+                          ...(volumePath ? { "x-uc-volume-path": volumePath } : {}),
+                        },
+                        body: JSON.stringify({
+                          input: [{ role: "user", content: combinedText }],
+                          stream: true,
+                          custom_inputs: {
+                            volume_path: volumePath,
+                            llm_model: selectedModel,
+                            thread_id: threadId,
+                          },
+                        }),
+                      });
+                      if (newStartRes.ok) {
+                        const { job_id: newJobId } = await newStartRes.json() as { job_id: string };
+                        jobId = newJobId;
+                        currentJobIdRef.current = newJobId;
+                        lastEventId = -1;
+                      } else {
+                        streamCompleted = true;
+                      }
+                    } catch {
+                      streamCompleted = true;
+                    }
+                  } else {
+                    streamCompleted = true;
+                  }
+                } else {
+                  // 停止ボタンまたは予期しないクローズ → 終了
+                  streamCompleted = true;
+                }
+              }
+              break;
+            }
 
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split("\n");
@@ -775,61 +858,6 @@ function ChatPage() {
                       }
                       return updated;
                     });
-                  } else if (resolvedType === "stream.interrupted") {
-                    const queue = [...messageQueueRef.current];
-                    if (queue.length > 0) {
-                      setMessageQueue([]);
-                      messageQueueRef.current = [];
-                      const combinedText = queue.join("\n");
-
-                      // 新しいユーザーメッセージとアシスタントプレースホルダーを追加
-                      setMessages(prev => [
-                        ...prev,
-                        { role: "user" as const, content: combinedText },
-                        { role: "assistant" as const, content: "", blocks: [], toolCallBlocks: [] },
-                      ]);
-                      activeSubagentCallIdRef.current = null;
-
-                      // 新ジョブを開始
-                      if (!ctrl.signal.aborted) {
-                        try {
-                          const newStartRes = await fetch("/api/chat/start", {
-                            method: "POST",
-                            signal: ctrl.signal,
-                            headers: {
-                              "Content-Type": "application/json",
-                              ...(volumePath ? { "x-uc-volume-path": volumePath } : {}),
-                            },
-                            body: JSON.stringify({
-                              input: [{ role: "user", content: combinedText }],
-                              stream: true,
-                              custom_inputs: {
-                                volume_path: volumePath,
-                                llm_model: selectedModel,
-                                thread_id: threadId,
-                              },
-                            }),
-                          });
-                          if (newStartRes.ok) {
-                            const { job_id: newJobId } = await newStartRes.json() as { job_id: string };
-                            jobId = newJobId;
-                            currentJobIdRef.current = newJobId;
-                            lastEventId = -1;
-                          } else {
-                            streamCompleted = true;
-                          }
-                        } catch {
-                          streamCompleted = true;
-                        }
-                      } else {
-                        streamCompleted = true;
-                      }
-                    } else {
-                      // キューが空 → ストリーム終了として扱う
-                      streamCompleted = true;
-                    }
-                    shouldBreakReader = true;
-                    break;
                   } else if (resolvedType === "error" && (data.error || data.message)) {
                     streamCompleted = true; // エラーもストリーム終了として扱う
                     setMessages((prev) => {
@@ -905,6 +933,7 @@ function ChatPage() {
       }
     } finally {
       setStreaming(false);
+      setStopping(false);
       abortControllerRef.current = null;
     }
   };
@@ -1000,6 +1029,7 @@ function ChatPage() {
       <ChatContent
         messages={messages}
         streaming={streaming}
+        stopping={stopping}
         isLoadingHistory={isLoadingHistory}
         volumePath={volumePath}
         selectedModel={selectedModel}
@@ -1027,6 +1057,7 @@ function ChatPage() {
 type ChatContentProps = {
   messages: ChatMessage[];
   streaming: boolean;
+  stopping: boolean;
   isLoadingHistory: boolean;
   volumePath: string;
   selectedModel: string;
@@ -1047,6 +1078,7 @@ type ChatContentProps = {
 function ChatContent({
   messages,
   streaming,
+  stopping,
   isLoadingHistory,
   volumePath,
   selectedModel,
@@ -1246,8 +1278,8 @@ function ChatContent({
           <VolumeExplorer value={volumePath} onSelect={onVolumeSelect} />
         </PromptInputTools>
         <PromptInputSubmit
-          status={streaming ? "streaming" : undefined}
-          onClick={streaming ? onStop : undefined}
+          status={stopping ? "submitted" : streaming ? "streaming" : undefined}
+          onClick={streaming && !stopping ? onStop : undefined}
         />
       </PromptInputFooter>
     </PromptInput>

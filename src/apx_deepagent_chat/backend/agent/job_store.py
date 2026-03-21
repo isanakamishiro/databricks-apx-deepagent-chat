@@ -26,6 +26,7 @@ class Job:
     error: Optional[str] = None
     task: Optional[asyncio.Task] = None
     interrupt_requested: bool = False
+    subagent_interrupt_requested: bool = False
 
 
 class JobStore:
@@ -50,16 +51,23 @@ class JobStore:
         job.notify.set()
         return event_id
 
-    def request_interrupt(self, job_id: str) -> None:
-        """指定ジョブに割り込みフラグをセットする."""
+    def request_interrupt(self, job_id: str, deep: bool = False) -> None:
+        """指定ジョブに割り込みフラグをセットする。deep=True のときはサブエージェントも対象にする."""
         job = self._jobs.get(job_id)
         if job:
             job.interrupt_requested = True
+            if deep:
+                job.subagent_interrupt_requested = True
 
     def is_interrupt_requested(self, job_id: str) -> bool:
         """指定ジョブの割り込みフラグを返す."""
         job = self._jobs.get(job_id)
         return job.interrupt_requested if job else False
+
+    def is_subagent_interrupt_requested(self, job_id: str) -> bool:
+        """指定ジョブのサブエージェント割り込みフラグを返す."""
+        job = self._jobs.get(job_id)
+        return job.subagent_interrupt_requested if job else False
 
     def mark_done(self, job_id: str) -> None:
         job = self._jobs.get(job_id)

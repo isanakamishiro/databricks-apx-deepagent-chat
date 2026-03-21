@@ -1,7 +1,12 @@
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from langchain.agents.middleware import AgentMiddleware, Runtime, wrap_model_call, wrap_tool_call
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    Runtime,
+    wrap_model_call,
+    wrap_tool_call,
+)
 from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.types import interrupt as langgraph_interrupt
 
@@ -12,21 +17,36 @@ _tool_call_semaphore = asyncio.Semaphore(4)
 
 
 class InterruptMiddleware(AgentMiddleware):
-    """モデル呼び出し完了後に割り込みフラグをチェックし、セットされていれば LangGraph を正常停止させる."""
+    """モデル呼び出し前に割り込みフラグをチェックし、セットされていれば LangGraph を正常停止させる.
 
-    def __init__(self, job_id: str, job_store: "JobStore") -> None:
+    check_subagent=False (デフォルト): メインエージェント用。interrupt_requested フラグを参照。
+    check_subagent=True: サブエージェント用。subagent_interrupt_requested フラグを参照。
+    """
+
+    def __init__(
+        self, job_id: str, job_store: "JobStore", check_subagent: bool = False
+    ) -> None:
         self.job_id = job_id
         self.job_store = job_store
+        self.check_subagent = check_subagent
 
-    def after_model(self, state: Any, runtime: Runtime) -> None:
-        """モデル呼び出し完了後に割り込みフラグをチェック。
-        Trueならlanggraph_interruptを呼んでグラフを正常停止。"""
-        if self.job_store.is_interrupt_requested(self.job_id):
-            langgraph_interrupt({"reason": "user_interrupt"})
+    def before_model(self, state: Any, runtime: Runtime) -> None:
+        if self.check_subagent:
+            if self.job_store.is_subagent_interrupt_requested(self.job_id):
+                langgraph_interrupt({"reason": "user_interrupt"})
+        else:
+            if self.job_store.is_interrupt_requested(self.job_id):
+                langgraph_interrupt({"reason": "user_interrupt"})
         return None
 
-    async def aafter_model(self, state: Any, runtime: Runtime) -> None:
-        return self.after_model(state, runtime)
+    # def after_model(self, state: Any, runtime: Runtime) -> None:
+    #     return self.before_model(state, runtime)
+
+    async def abefore_model(self, state: Any, runtime: Runtime) -> None:
+        return self.before_model(state, runtime)
+
+    # async def aafter_model(self, state: Any, runtime: Runtime) -> None:
+    #     return self.after_model(state, runtime)
 
 
 @wrap_tool_call  # type: ignore[arg-type]

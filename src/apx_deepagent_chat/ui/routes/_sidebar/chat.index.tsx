@@ -148,8 +148,8 @@ function ChatIndexContent() {
         </Alert>
       )}
       <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold">APX DeepAgent Chat</h1>
-        <p className="text-muted-foreground text-sm">何でも聞いてください</p>
+        <h1 className="text-2xl font-bold">Databricks-apx DeepAgent Chat</h1>
+        <p className="text-muted-foreground text-sm">Ask me anything.</p>
       </div>
       <div className="flex justify-center w-full max-w-2xl">
         <Suggestions>

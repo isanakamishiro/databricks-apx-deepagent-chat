@@ -32,18 +32,9 @@ type TodoPanelProps = {
 };
 
 export function TodoPanel({ groups }: TodoPanelProps) {
-  const totalCount = groups.reduce((sum, g) => sum + g.todos.length, 0);
-
   return (
     <ScrollArea className="h-full">
       <div className="p-3 space-y-3">
-        <div className="flex items-center gap-2 px-1">
-          <span className="text-sm font-semibold text-foreground">Tasks</span>
-          <span className="text-xs text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
-            {totalCount}
-          </span>
-        </div>
-
         {groups.map((group) => (
           <Queue key={group.agentId}>
             <QueueSection defaultOpen={true}>

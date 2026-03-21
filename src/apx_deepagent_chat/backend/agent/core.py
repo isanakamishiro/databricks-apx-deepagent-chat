@@ -183,6 +183,8 @@ def _build_subagents(
     mcp_tools: list,
     ws_client: Optional[WorkspaceClient] = None,
     override_model=None,
+    job_id: Optional[str] = None,
+    job_store=None,
 ) -> list:
     """Load subagent definitions from YAML and inject dynamic tools."""
     subagents = _load_subagents(_SUBAGENTS_CONFIG_PATH)
@@ -214,6 +216,11 @@ def _build_subagents(
                 thread_limit=80,
                 run_limit=20,
             ),
+            *(
+                [InterruptMiddleware(job_id=job_id, job_store=job_store, check_subagent=True)]
+                if job_id and job_store
+                else []
+            ),
         ]
 
         result.append(sa)
@@ -228,6 +235,8 @@ async def init_agent(
     volume_path: Optional[str] = None,
     override_subagent_model: Optional[BaseChatModel] = None,
     extra_middleware: Optional[list] = None,
+    job_id: Optional[str] = None,
+    job_store=None,
 ):
 
     sp_ws_client = get_sp_workspace_client()
@@ -261,6 +270,8 @@ async def init_agent(
         mcp_tools=mcp_tools,
         ws_client=ws_client,
         override_model=override_subagent_model,
+        job_id=job_id,
+        job_store=job_store,
     )
 
     return create_deep_agent(
@@ -358,6 +369,8 @@ async def stream_handler(
                 volume_path=volume_path,
                 override_subagent_model=override_model,
                 extra_middleware=interrupt_mw,
+                job_id=str(job_id) if job_id else None,
+                job_store=job_store,
             )
 
             all_messages = to_chat_completions_input(

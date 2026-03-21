@@ -74,12 +74,14 @@ async def _run_agent_background(job_id: str, body: dict) -> None:
             span.set_inputs(span_input)
 
             agent_request = ResponsesAgentRequest(**body)
+            data = None
             async for event in stream_handler(agent_request):
                 event_type = str(event.type) if hasattr(event, "type") else ""
                 data = event.model_dump(mode="json")
                 _job_store.append_event(job_id, event_type, data)
             _job_store.mark_done(job_id)
-            span.set_outputs(data)
+            if data is not None:
+                span.set_outputs(data)
     except Exception:
         logger.exception("Background agent error for job %s", job_id)
         _job_store.mark_error(job_id, "Agent processing failed")
@@ -213,9 +215,9 @@ def create_server_app() -> FastAPI:
         operation_id="chatInterrupt",
         response_model=ChatInterruptResponse,
     )
-    async def chat_interrupt(job_id: str):
-        """指定ジョブに割り込みフラグをセットする。次のモデル呼び出し完了後にストリームを停止する."""
-        _job_store.request_interrupt(job_id)
+    async def chat_interrupt(job_id: str, deep: bool = False):
+        """指定ジョブに割り込みフラグをセットする。deep=True のときはサブエージェントも停止する（停止ボタン用）."""
+        _job_store.request_interrupt(job_id, deep=deep)
         return ChatInterruptResponse(ok=True)
 
     # ─── GET /api/chat/stream/{job_id} ───────────────────────────────────────

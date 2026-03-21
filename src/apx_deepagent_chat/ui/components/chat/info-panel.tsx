@@ -49,36 +49,41 @@ export function InfoPanel({ files, volumePath, todoGroups, messageQueue, onRemov
     prevQueueLengthRef.current = messageQueue.length;
     prevAttachmentsLengthRef.current = uploadedAttachments.length;
 
-    if (filesAdded || todosAdded || queueAdded || attachmentsAdded) {
+    const somethingAdded = filesAdded || todosAdded || queueAdded || attachmentsAdded;
+
+    if (somethingAdded) {
+      // コンテンツが追加されたら表示してタブ切り替え
       setIsVisible(true);
       setIsCollapsed(false);
       if (queueAdded) setActiveTab("queue");
       else if (attachmentsAdded) setActiveTab("attachments");
       else if (filesAdded) setActiveTab("files");
       else setActiveTab("tasks");
-    }
-    if (files.length === 0 && totalTodosCount === 0 && messageQueue.length === 0 && uploadedAttachments.length === 0) {
-      setIsVisible(false);
-    }
-    // アクティブなタブのコンテンツがなくなったら別タブへ切り替え
-    const findFallbackTab = () => {
-      if (files.length > 0) return "files" as const;
-      if (totalTodosCount > 0) return "tasks" as const;
-      if (uploadedAttachments.length > 0) return "attachments" as const;
-      if (messageQueue.length > 0) return "queue" as const;
-      return null;
-    };
-    if (activeTab === "queue" && messageQueue.length === 0) {
-      const tab = findFallbackTab();
-      if (tab) setActiveTab(tab);
-    }
-    if (activeTab === "files" && files.length === 0) {
-      const tab = findFallbackTab();
-      if (tab) setActiveTab(tab);
-    }
-    if (activeTab === "tasks" && totalTodosCount === 0) {
-      const tab = findFallbackTab();
-      if (tab) setActiveTab(tab);
+    } else {
+      // コンテンツが減った場合のみフォールバック処理
+      if (files.length === 0 && totalTodosCount === 0 && messageQueue.length === 0 && uploadedAttachments.length === 0) {
+        setIsVisible(false);
+      }
+      // アクティブなタブのコンテンツがなくなったら別タブへ切り替え
+      const findFallbackTab = () => {
+        if (files.length > 0) return "files" as const;
+        if (totalTodosCount > 0) return "tasks" as const;
+        if (uploadedAttachments.length > 0) return "attachments" as const;
+        if (messageQueue.length > 0) return "queue" as const;
+        return null;
+      };
+      if (activeTab === "queue" && messageQueue.length === 0) {
+        const tab = findFallbackTab();
+        if (tab) setActiveTab(tab);
+      }
+      if (activeTab === "files" && files.length === 0) {
+        const tab = findFallbackTab();
+        if (tab) setActiveTab(tab);
+      }
+      if (activeTab === "tasks" && totalTodosCount === 0) {
+        const tab = findFallbackTab();
+        if (tab) setActiveTab(tab);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files.length, totalTodosCount, messageQueue.length, uploadedAttachments.length]);
