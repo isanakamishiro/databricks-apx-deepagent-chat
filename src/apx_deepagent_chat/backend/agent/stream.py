@@ -159,8 +159,16 @@ def _process_main_agent_messages(
             chunk.response_metadata.get("model_provider"),
             len(blocks),
             [b.get("type") for b in blocks if isinstance(b, dict)],
-            sum(len(b.get("reasoning", "")) for b in blocks if isinstance(b, dict) and b.get("type") == "reasoning"),
-            sum(len(b.get("text", "")) for b in blocks if isinstance(b, dict) and b.get("type") == "text"),
+            sum(
+                len(b.get("reasoning", ""))
+                for b in blocks
+                if isinstance(b, dict) and b.get("type") == "reasoning"
+            ),
+            sum(
+                len(b.get("text", ""))
+                for b in blocks
+                if isinstance(b, dict) and b.get("type") == "text"
+            ),
         )
 
         if not blocks:
@@ -171,15 +179,6 @@ def _process_main_agent_messages(
         reasoning = "".join(
             b.get("reasoning", "") for b in blocks if b.get("type") == "reasoning"
         )
-
-        if text:
-            state.accumulated_text += text
-            state.text_item_id = item_id
-            yield _log_and_yield(
-                ResponsesAgentStreamEvent(
-                    **create_text_delta(delta=text, item_id=item_id)
-                )
-            )
 
         if reasoning:
             state.accumulated_reasoning += reasoning
@@ -193,6 +192,16 @@ def _process_main_agent_messages(
                     }
                 )
             )
+
+        if text:
+            state.accumulated_text += text
+            state.text_item_id = item_id
+            yield _log_and_yield(
+                ResponsesAgentStreamEvent(
+                    **create_text_delta(delta=text, item_id=item_id)
+                )
+            )
+
     except Exception as e:
         logger.exception(f"Error processing agent stream event: {e}")
 
@@ -235,11 +244,15 @@ def _finalize_stream(
     usage_data: dict[str, Any] = {
         "input_tokens": total_tokens - output_tokens,
         "input_tokens_details": {
-            "cached_tokens": ua.get("prompt_tokens_details", {}).get("cached_tokens", 0),
+            "cached_tokens": ua.get("prompt_tokens_details", {}).get(
+                "cached_tokens", 0
+            ),
         },
         "output_tokens": output_tokens,
         "output_tokens_details": {
-            "reasoning_tokens": ua.get("completion_tokens_details", {}).get("reasoning_tokens", 0),
+            "reasoning_tokens": ua.get("completion_tokens_details", {}).get(
+                "reasoning_tokens", 0
+            ),
         },
         "total_tokens": total_tokens,
     }

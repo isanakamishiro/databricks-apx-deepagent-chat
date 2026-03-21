@@ -19,14 +19,14 @@ import os
 import sys
 from pathlib import Path
 
+from deepagents import create_deep_agent
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from pydantic import SecretStr
 
-from apx_deepagent_chat.backend.agent import init_agent, init_model
+from apx_deepagent_chat.backend.agent import init_agent
 from apx_deepagent_chat.backend.agent.clients import get_user_workspace_client
 from apx_deepagent_chat.backend.agent.core import _load_preset_files
-from apx_deepagent_chat.backend.agent.model_loader import load_models_config
 from apx_deepagent_chat.backend.agent.reasoning_model import ChatOpenAIWithReasoning
 from apx_deepagent_chat.backend.agent.stream import process_agent_astream_events
 
@@ -66,8 +66,6 @@ TEST_CASES = [
 
 async def run_test_chatmodel():
 
-    from langchain.agents import create_agent
-
     model_name = os.environ.get("REASONING_MODEL", "ext-endpoint-middle")
     api_base = os.environ.get("OPENAI_API_BASE", "")
     api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -86,20 +84,30 @@ async def run_test_chatmodel():
         top_p=0.9,
     )
 
-    agent = create_agent(
+    agent = create_deep_agent(
         model=model,
         tools=[],
     )
 
-    resp = agent.invoke(
+    for chunk in agent.stream(
         {"messages": [HumanMessage(content="9.11 or 9.8、どちらが大きい?")]},
-    )
+        stream_mode="messages",
+        version="v2",
+    ):
+        if chunk["type"] == "messages":
+            token, metadata = chunk["data"]
+            print(f"node: {metadata['langgraph_node']}")
+            print(f"content: {token.content_blocks}")
+            print("\n")
+    # resp = agent.invoke(
+    #     {"messages": [HumanMessage(content="9.11 or 9.8、どちらが大きい?")]},
+    # )
 
-    from pprint import pprint
+    # from pprint import pprint
 
-    messages = resp.get("messages", [])
-    for msg in messages:
-        pprint(msg.content_blocks)
+    # messages = resp.get("messages", [])
+    # for msg in messages:
+    #     pprint(msg.content_blocks)
 
 
 def _make_fake_model():
@@ -140,10 +148,28 @@ async def run_test_case(
     print(f"メッセージ: {message}")
     print("-" * 50)
 
+    model_name = os.environ.get("REASONING_MODEL", "ext-endpoint-middle")
+    api_base = os.environ.get("OPENAI_API_BASE", "")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+
+    if not api_base or not api_key:
+        print("環境変数 OPENAI_API_BASE / OPENAI_API_KEY を設定してください")
+        sys.exit(1)
+
+    model = ChatOpenAIWithReasoning(
+        model=model_name,  # type: ignore[unknown-argument]
+        base_url=api_base,  # type: ignore[unknown-argument]
+        api_key=SecretStr(api_key),  # type: ignore[unknown-argument]
+        streaming=True,
+        max_tokens=2048,
+        temperature=1.0,
+        top_p=0.9,
+    )
+
     user_workspace_client = get_user_workspace_client()
-    default_model = next(k for k, v in load_models_config().items() if v.get("default"))
-    # default_model = "databricks-qwen3-next-80b-a3b-instruct"
-    model = init_model(default_model, user_workspace_client)
+    # # default_model = next(k for k, v in load_models_config().items() if v.get("default"))
+    # default_model = "ext-endpoint-middle"
+    # model = init_model(default_model, user_workspace_client)
     if override_model:
         print(
             f"*** モデルを {override_model.__class__.__name__} にオーバーライドして実行 ***"
