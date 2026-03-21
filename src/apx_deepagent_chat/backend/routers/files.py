@@ -16,6 +16,20 @@ from ..core import Dependencies
 
 router = APIRouter()
 
+ALLOWED_EXTENSIONS = {
+    # ドキュメント
+    ".txt", ".md", ".html", ".htm", ".css",
+    ".py", ".yaml", ".yml", ".json", ".xml", ".csv",
+    ".js", ".ts", ".tsx", ".jsx", ".sh", ".sql",
+    ".toml", ".ini", ".conf", ".log", ".rst", ".tex",
+    ".r", ".rb", ".java", ".c", ".cpp", ".h",
+    ".go", ".rs", ".scala", ".kt", ".swift",
+    # 画像
+    ".png", ".jpg", ".jpeg", ".gif", ".webp",
+}
+
+ATTACHMENT_UPLOAD_DIR = "/upload_files/"
+
 
 def _delete_directory_recursive(w: WorkspaceClient, dir_path: str):
     """ディレクトリ内を再帰削除し、ディレクトリ自体も削除する."""
@@ -126,6 +140,53 @@ async def files_upload(
         ws.files.upload(real_path, io.BytesIO(content), overwrite=True)
     except Exception as e:
         logger.exception("File upload failed for path: %s", real_path)
+        raise HTTPException(status_code=500, detail="Upload failed")
+
+    return {"ok": True, "path": virtual_path}
+
+
+@router.post("/files/upload-attachment", operation_id="filesUploadAttachment")
+async def files_upload_attachment(
+    volume_path: Dependencies.VolumePath,
+    ws: Dependencies.UserClient,
+    file: UploadFile = File(...),
+):
+    original_name = file.filename or "upload"
+    suffix = PurePosixPath(original_name).suffix.lower()
+    stem = PurePosixPath(original_name).stem
+
+    # ファイルタイプ検証
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {suffix}. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+
+    # /upload_files/ ディレクトリ内の既存ファイル一覧取得
+    real_upload_dir = to_real_path(volume_path, ATTACHMENT_UPLOAD_DIR)
+    try:
+        entries = list(ws.files.list_directory_contents(real_upload_dir))
+        existing_names = {
+            PurePosixPath(e.path).name for e in entries if e.path is not None
+        }
+    except (NotFound, ResourceDoesNotExist):
+        existing_names = set()
+
+    # ユニークなファイル名を決定
+    unique_name = original_name
+    counter = 1
+    while unique_name in existing_names:
+        unique_name = f"{stem}_{counter}{suffix}"
+        counter += 1
+
+    virtual_path = ATTACHMENT_UPLOAD_DIR + unique_name
+    real_path = to_real_path(volume_path, virtual_path)
+
+    content = await file.read()
+    try:
+        ws.files.upload(real_path, io.BytesIO(content), overwrite=False)
+    except Exception:
+        logger.exception("Attachment upload failed for path: %s", real_path)
         raise HTTPException(status_code=500, detail="Upload failed")
 
     return {"ok": True, "path": virtual_path}
