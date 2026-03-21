@@ -1,13 +1,12 @@
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from langchain.agents.middleware import AgentMiddleware, wrap_model_call, wrap_tool_call
+from langchain.agents.middleware import AgentMiddleware, Runtime, wrap_model_call, wrap_tool_call
 from langchain_core.messages import SystemMessage, ToolMessage
-from langgraph.runtime import Runtime
 from langgraph.types import interrupt as langgraph_interrupt
 
 if TYPE_CHECKING:
-    from apx_deepagent_chat.backend.agent.job_store import JobStore
+    from .job_store import JobStore
 
 _tool_call_semaphore = asyncio.Semaphore(4)
 
