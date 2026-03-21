@@ -25,6 +25,7 @@ class Job:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     error: Optional[str] = None
     task: Optional[asyncio.Task] = None
+    interrupt_requested: bool = False
 
 
 class JobStore:
@@ -48,6 +49,17 @@ class JobStore:
         job.events.append(JobEvent(id=event_id, event_type=event_type, data=data))
         job.notify.set()
         return event_id
+
+    def request_interrupt(self, job_id: str) -> None:
+        """指定ジョブに割り込みフラグをセットする."""
+        job = self._jobs.get(job_id)
+        if job:
+            job.interrupt_requested = True
+
+    def is_interrupt_requested(self, job_id: str) -> bool:
+        """指定ジョブの割り込みフラグを返す."""
+        job = self._jobs.get(job_id)
+        return job.interrupt_requested if job else False
 
     def mark_done(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
