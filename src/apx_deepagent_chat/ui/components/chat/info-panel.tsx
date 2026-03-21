@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, CheckSquare, ChevronDown, ChevronUp, Clock, X } from "lucide-react";
+import { FileText, CheckSquare, Paperclip, ChevronDown, ChevronUp, Clock, X } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GeneratedFiles } from "@/components/chat/generated-files";
 import { TodoPanel, type AgentTodosGroup } from "@/components/chat/todo-panel";
+import { AttachmentPanel, type UploadedAttachment } from "@/components/chat/attachment-panel";
 
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 400;
@@ -18,19 +19,22 @@ type InfoPanelProps = {
   todoGroups: AgentTodosGroup[];
   messageQueue: string[];
   onRemoveQueueItem: (index: number) => void;
+  uploadedAttachments: UploadedAttachment[];
+  onAttachmentRemove: (id: string) => void;
 };
 
-export function InfoPanel({ files, volumePath, todoGroups, messageQueue, onRemoveQueueItem }: InfoPanelProps) {
+export function InfoPanel({ files, volumePath, todoGroups, messageQueue, onRemoveQueueItem, uploadedAttachments, onAttachmentRemove }: InfoPanelProps) {
   const [height, setHeight] = useState(200);
   const [isVisible, setIsVisible] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<"files" | "tasks" | "queue">("files");
+  const [activeTab, setActiveTab] = useState<"files" | "tasks" | "queue" | "attachments">("files");
   const [isDragging, setIsDragging] = useState(false);
   const dragStartYRef = useRef(0);
   const dragStartHeightRef = useRef(200);
   const prevFilesLengthRef = useRef(0);
   const prevTodosCountRef = useRef(0);
   const prevQueueLengthRef = useRef(0);
+  const prevAttachmentsLengthRef = useRef(0);
 
   const totalTodosCount = todoGroups.reduce((s, g) => s + g.todos.length, 0);
 
@@ -39,27 +43,45 @@ export function InfoPanel({ files, volumePath, todoGroups, messageQueue, onRemov
     const filesAdded = files.length > prevFilesLengthRef.current;
     const todosAdded = totalTodosCount > prevTodosCountRef.current;
     const queueAdded = messageQueue.length > prevQueueLengthRef.current;
+    const attachmentsAdded = uploadedAttachments.length > prevAttachmentsLengthRef.current;
     prevFilesLengthRef.current = files.length;
     prevTodosCountRef.current = totalTodosCount;
     prevQueueLengthRef.current = messageQueue.length;
+    prevAttachmentsLengthRef.current = uploadedAttachments.length;
 
-    if (filesAdded || todosAdded || queueAdded) {
+    if (filesAdded || todosAdded || queueAdded || attachmentsAdded) {
       setIsVisible(true);
       setIsCollapsed(false);
       if (queueAdded) setActiveTab("queue");
+      else if (attachmentsAdded) setActiveTab("attachments");
       else if (filesAdded) setActiveTab("files");
       else setActiveTab("tasks");
     }
-    if (files.length === 0 && totalTodosCount === 0 && messageQueue.length === 0) {
+    if (files.length === 0 && totalTodosCount === 0 && messageQueue.length === 0 && uploadedAttachments.length === 0) {
       setIsVisible(false);
     }
-    // キューが空になったら queue タブから他のタブへ切り替え
-    if (messageQueue.length === 0 && activeTab === "queue") {
-      if (files.length > 0) setActiveTab("files");
-      else if (totalTodosCount > 0) setActiveTab("tasks");
+    // アクティブなタブのコンテンツがなくなったら別タブへ切り替え
+    const findFallbackTab = () => {
+      if (files.length > 0) return "files" as const;
+      if (totalTodosCount > 0) return "tasks" as const;
+      if (uploadedAttachments.length > 0) return "attachments" as const;
+      if (messageQueue.length > 0) return "queue" as const;
+      return null;
+    };
+    if (activeTab === "queue" && messageQueue.length === 0) {
+      const tab = findFallbackTab();
+      if (tab) setActiveTab(tab);
+    }
+    if (activeTab === "files" && files.length === 0) {
+      const tab = findFallbackTab();
+      if (tab) setActiveTab(tab);
+    }
+    if (activeTab === "tasks" && totalTodosCount === 0) {
+      const tab = findFallbackTab();
+      if (tab) setActiveTab(tab);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files.length, totalTodosCount, messageQueue.length]);
+  }, [files.length, totalTodosCount, messageQueue.length, uploadedAttachments.length]);
 
   // ドラッグリサイズ
   const handleDragMouseDown = (e: React.MouseEvent) => {
@@ -109,29 +131,29 @@ export function InfoPanel({ files, volumePath, todoGroups, messageQueue, onRemov
         />
       )}
       {/* タブUI */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "files" | "tasks" | "queue")} className="flex flex-col h-full">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "files" | "tasks" | "queue" | "attachments")} className="flex flex-col h-full">
         <div className="flex items-center px-3 border-b" style={{ height: `${TAB_HEADER_HEIGHT}px` }}>
           <TabsList className="h-7 bg-transparent p-0 gap-1">
-            <TabsTrigger
-              value="files"
-              className="text-xs h-6 px-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
-            >
-              <FileText className="size-3 mr-1" />
-              生成されたファイル
-              {files.length > 0 && (
+            {files.length > 0 && (
+              <TabsTrigger
+                value="files"
+                className="text-xs h-6 px-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
+              >
+                <FileText className="size-3 mr-1" />
+                生成されたファイル
                 <Badge variant="secondary" className="ml-1 text-xs h-4 px-1 min-w-4">{files.length}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger
-              value="tasks"
-              className="text-xs h-6 px-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
-            >
-              <CheckSquare className="size-3 mr-1" />
-              Tasks
-              {totalTodosCount > 0 && (
+              </TabsTrigger>
+            )}
+            {totalTodosCount > 0 && (
+              <TabsTrigger
+                value="tasks"
+                className="text-xs h-6 px-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
+              >
+                <CheckSquare className="size-3 mr-1" />
+                Tasks
                 <Badge variant="secondary" className="ml-1 text-xs h-4 px-1 min-w-4">{totalTodosCount}</Badge>
-              )}
-            </TabsTrigger>
+              </TabsTrigger>
+            )}
             {messageQueue.length > 0 && (
               <TabsTrigger
                 value="queue"
@@ -140,6 +162,16 @@ export function InfoPanel({ files, volumePath, todoGroups, messageQueue, onRemov
                 <Clock className="size-3 mr-1" />
                 待機中
                 <Badge variant="secondary" className="ml-1 text-xs h-4 px-1 min-w-4">{messageQueue.length}</Badge>
+              </TabsTrigger>
+            )}
+            {uploadedAttachments.length > 0 && (
+              <TabsTrigger
+                value="attachments"
+                className="text-xs h-6 px-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
+              >
+                <Paperclip className="size-3 mr-1" />
+                添付ファイル
+                <Badge variant="secondary" className="ml-1 text-xs h-4 px-1 min-w-4">{uploadedAttachments.length}</Badge>
               </TabsTrigger>
             )}
           </TabsList>
@@ -165,6 +197,12 @@ export function InfoPanel({ files, volumePath, todoGroups, messageQueue, onRemov
             </TabsContent>
             <TabsContent value="tasks" className="mt-0 h-full">
               <TodoPanel groups={todoGroups} />
+            </TabsContent>
+            <TabsContent value="attachments" className="mt-0 p-3 h-full">
+              <AttachmentPanel
+                attachments={uploadedAttachments}
+                onRemove={onAttachmentRemove}
+              />
             </TabsContent>
             <TabsContent value="queue" className="mt-0 p-3 h-full">
               {messageQueue.length === 0 ? (

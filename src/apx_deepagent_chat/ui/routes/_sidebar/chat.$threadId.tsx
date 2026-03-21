@@ -1,9 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SubAgentBlock, type SubAgentBlockData } from "@/components/chat/subagent-block";
-import { AlertCircle, Copy, RefreshCw, Paperclip } from "lucide-react";
-import { AttachmentPanel, type UploadedAttachment } from "@/components/chat/attachment-panel";
+import { AlertCircle, Copy, MessageSquare, RefreshCw, Plus } from "lucide-react";
+import { type UploadedAttachment } from "@/components/chat/attachment-panel";
 import { nanoid } from "nanoid";
+import { takePendingFiles } from "@/lib/pending-files";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Message,
@@ -15,6 +16,7 @@ import {
 import {
   Conversation,
   ConversationContent,
+  ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import {
@@ -71,6 +73,7 @@ import { getRandomWaitMessage } from "@/config/wait-messages";
 export const Route = createFileRoute("/_sidebar/chat/$threadId")({
   validateSearch: (search: Record<string, unknown>) => ({
     q: typeof search.q === "string" ? search.q : undefined,
+    files: typeof search.files === "string" ? search.files : undefined,
   }),
   component: () => <ChatPage />,
 });
@@ -220,7 +223,7 @@ function getOrCreateUserId(): string {
 
 function ChatPage() {
   const { threadId } = Route.useParams();
-  const { q: initialQuery } = Route.useSearch();
+  const { q: initialQuery, files: initialFiles } = Route.useSearch();
   const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -230,6 +233,7 @@ function ChatPage() {
   const messagesRef = useRef<ChatMessage[]>([]);
   const prevStreamingRef = useRef(false);
   const initialQueryFiredRef = useRef(false);
+  const initialFilesFiredRef = useRef(false);
   const persistedCountRef = useRef(0);
   const prevThreadIdRef = useRef<string | null>(null);
   messagesRef.current = messages;
@@ -257,6 +261,12 @@ function ChatPage() {
 
   const handleAttachmentRemove = (id: string) => {
     setUploadedAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const handleAttachmentUpdate = (id: string, updates: Partial<UploadedAttachment>) => {
+    setUploadedAttachments((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, ...updates } : a))
+    );
   };
 
   // threadId 変更時に履歴をロード
@@ -366,8 +376,8 @@ function ChatPage() {
     localStorage.setItem(STORAGE_KEY_MODEL, model);
   };
 
-  const handleSubmit = async (text: string) => {
-    if (!text.trim() && uploadedAttachments.length === 0) return;
+  const handleSubmit = async (text: string, extraFilePaths?: string[]) => {
+    if (!text.trim() && uploadedAttachments.length === 0 && !extraFilePaths?.length) return;
     if (isLoadingHistory) return;
 
     // ストリーミング中は queue に追加して割り込みをリクエスト
@@ -403,11 +413,15 @@ function ChatPage() {
 
     // APIに送信するテキスト（<files>ブロック付き）を構築
     let apiText = text;
-    if (uploadedAttachments.length > 0) {
-      const paths = uploadedAttachments
-        .map((a) => `  <path>${a.virtualPath}</path>`)
-        .join("\n");
-      apiText = `${text}\n\n<files>\n${paths}\n</files>`;
+    const allPaths = [
+      ...uploadedAttachments
+        .filter((a) => !a.uploading && !a.error && a.virtualPath)
+        .map((a) => a.virtualPath),
+      ...(extraFilePaths ?? []),
+    ];
+    if (allPaths.length > 0) {
+      const pathLines = allPaths.map((p) => `  <path>${p}</path>`).join("\n");
+      apiText = `${text}\n\n<files>\n${pathLines}\n</files>`;
     }
 
     setUploadedAttachments([]);
@@ -907,16 +921,79 @@ function ChatPage() {
   useEffect(() => {
     if (!initialQuery || initialQueryFiredRef.current) return;
     initialQueryFiredRef.current = true;
-    // URLから q を除去（ブラウザ履歴に残さない）
+    // URLから q, files を除去（ブラウザ履歴に残さない）
     navigate({
       to: "/chat/$threadId",
       params: { threadId },
-      search: { q: undefined },
+      search: { q: undefined, files: undefined },
       replace: true,
     });
-    handleSubmit(initialQuery);
+    const filePaths = initialFiles ? initialFiles.split(",").filter(Boolean) : [];
+    handleSubmit(initialQuery, filePaths);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialQuery]);
+
+  // search.files による添付ファイルの事前設定（q なしで files のみの場合）
+  useEffect(() => {
+    if (!initialFiles || initialFilesFiredRef.current || initialQueryFiredRef.current) return;
+    initialFilesFiredRef.current = true;
+    navigate({
+      to: "/chat/$threadId",
+      params: { threadId },
+      search: { q: undefined, files: undefined },
+      replace: true,
+    });
+    const filePaths = initialFiles.split(",").filter(Boolean);
+    const attachments: UploadedAttachment[] = filePaths.map((p) => {
+      const filename = p.split("/").pop() ?? p;
+      const ext = filename.includes(".") ? (filename.split(".").pop()?.toLowerCase() ?? "") : "";
+      return { id: nanoid(), filename, virtualPath: p, extension: ext };
+    });
+    setUploadedAttachments(attachments);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFiles]);
+
+  // ホーム画面から渡された File オブジェクトをマウント後にアップロード
+  useEffect(() => {
+    const files = takePendingFiles();
+    if (files.length === 0) return;
+
+    // プロビジョナルエントリを即座に追加
+    const provisionals: UploadedAttachment[] = files.map((file) => ({
+      id: nanoid(),
+      filename: file.name,
+      virtualPath: "",
+      extension: file.name.split(".").pop()?.toLowerCase() ?? "",
+      uploading: true,
+    }));
+    provisionals.forEach((p) => handleAttachmentAdd(p));
+
+    // 並列アップロード
+    const currentVolumePath = localStorage.getItem(STORAGE_KEY_VOLUME) ?? "";
+    Promise.all(
+      files.map(async (file, i) => {
+        const provisional = provisionals[i];
+        const formData = new FormData();
+        formData.append("file", file);
+        try {
+          const res = await fetch("/api/files/upload-attachment", {
+            method: "POST",
+            headers: currentVolumePath ? { "x-uc-volume-path": currentVolumePath } : {},
+            body: formData,
+          });
+          if (!res.ok) {
+            handleAttachmentUpdate(provisional.id, { uploading: false, error: true });
+            return;
+          }
+          const { path } = (await res.json()) as { path: string };
+          handleAttachmentUpdate(provisional.id, { uploading: false, virtualPath: path });
+        } catch {
+          handleAttachmentUpdate(provisional.id, { uploading: false, error: true });
+        }
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <PromptInputProvider>
@@ -939,6 +1016,7 @@ function ChatPage() {
         uploadedAttachments={uploadedAttachments}
         onAttachmentAdd={handleAttachmentAdd}
         onAttachmentRemove={handleAttachmentRemove}
+        onAttachmentUpdate={handleAttachmentUpdate}
       />
     </PromptInputProvider>
   );
@@ -963,6 +1041,7 @@ type ChatContentProps = {
   uploadedAttachments: UploadedAttachment[];
   onAttachmentAdd: (attachment: UploadedAttachment) => void;
   onAttachmentRemove: (id: string) => void;
+  onAttachmentUpdate: (id: string, updates: Partial<UploadedAttachment>) => void;
 };
 
 function ChatContent({
@@ -982,6 +1061,7 @@ function ChatContent({
   uploadedAttachments,
   onAttachmentAdd,
   onAttachmentRemove,
+  onAttachmentUpdate,
 }: ChatContentProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const waitMessageRef = useRef<string>(getRandomWaitMessage());
@@ -995,39 +1075,51 @@ function ChatContent({
     ".png",".jpg",".jpeg",".gif",".webp",
   ].join(",");
 
+  const MAX_ATTACHMENTS = 20;
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = ""; // input をリセット（同じファイルの再選択を可能にする）
+    const selected = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (selected.length === 0) return;
 
-    for (const file of files) {
-      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-      const formData = new FormData();
-      formData.append("file", file);
+    // 20件制限: 追加できる残り枠を計算
+    const remaining = MAX_ATTACHMENTS - uploadedAttachments.length;
+    if (remaining <= 0) return;
+    const files = selected.slice(0, remaining);
 
-      try {
-        const res = await fetch("/api/files/upload-attachment", {
-          method: "POST",
-          headers: volumePath ? { "x-uc-volume-path": volumePath } : {},
-          body: formData,
-        });
+    // プロビジョナルエントリを即座に追加
+    const provisionals: UploadedAttachment[] = files.map((file) => ({
+      id: nanoid(),
+      filename: file.name,
+      virtualPath: "",
+      extension: file.name.split(".").pop()?.toLowerCase() ?? "",
+      uploading: true,
+    }));
+    provisionals.forEach((p) => onAttachmentAdd(p));
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          console.error("Upload failed:", err);
-          continue;
+    // 並列アップロード
+    await Promise.all(
+      files.map(async (file, i) => {
+        const provisional = provisionals[i];
+        const formData = new FormData();
+        formData.append("file", file);
+        try {
+          const res = await fetch("/api/files/upload-attachment", {
+            method: "POST",
+            headers: volumePath ? { "x-uc-volume-path": volumePath } : {},
+            body: formData,
+          });
+          if (!res.ok) {
+            onAttachmentUpdate(provisional.id, { uploading: false, error: true });
+            return;
+          }
+          const { path } = (await res.json()) as { path: string };
+          onAttachmentUpdate(provisional.id, { uploading: false, virtualPath: path });
+        } catch {
+          onAttachmentUpdate(provisional.id, { uploading: false, error: true });
         }
-
-        const { path } = (await res.json()) as { path: string };
-        onAttachmentAdd({
-          id: nanoid(),
-          filename: file.name,
-          virtualPath: path,
-          extension: ext,
-        });
-      } catch (err) {
-        console.error("Upload error:", err);
-      }
-    }
+      })
+    );
   };
 
   useEffect(() => {
@@ -1097,6 +1189,24 @@ function ChatContent({
       </PromptInputBody>
       <PromptInputFooter>
         <PromptInputTools>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            type="button"
+            title="ファイルを添付"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Plus className="size-4" />
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept={ACCEPTED_EXTENSIONS}
+            multiple
+            onChange={handleFileChange}
+          />
           {availableModels.length > 0 && (
             <ModelSelector open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
               <ModelSelectorTrigger asChild>
@@ -1134,24 +1244,6 @@ function ChatContent({
             </ModelSelector>
           )}
           <VolumeExplorer value={volumePath} onSelect={onVolumeSelect} />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            type="button"
-            title="ファイルを添付"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Paperclip className="size-4" />
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            accept={ACCEPTED_EXTENSIONS}
-            multiple
-            onChange={handleFileChange}
-          />
         </PromptInputTools>
         <PromptInputSubmit
           status={streaming ? "streaming" : undefined}
@@ -1181,6 +1273,12 @@ function ChatContent({
                 <Skeleton className="h-24 w-72 rounded-2xl" />
               </div>
             </div>
+          ) : messages.length === 0 ? (
+            <ConversationEmptyState
+              title="会話を始めましょう"
+              description="メッセージを入力して会話を開始してください。"
+              icon={<MessageSquare className="size-6" />}
+            />
           ) : messages.map((msg, i) => {
             const isLast = i === messages.length - 1;
             return (
@@ -1392,13 +1490,11 @@ function ChatContent({
         todoGroups={agentTodosGroups}
         messageQueue={messageQueue}
         onRemoveQueueItem={onRemoveQueueItem}
+        uploadedAttachments={uploadedAttachments}
+        onAttachmentRemove={onAttachmentRemove}
       />
       <div className="shrink-0 border-t p-4">
         <div className="max-w-2xl mx-auto">
-          <AttachmentPanel
-            attachments={uploadedAttachments}
-            onRemove={onAttachmentRemove}
-          />
           {promptInput}
         </div>
       </div>

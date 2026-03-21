@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PromptInput,
   PromptInputBody,
@@ -28,7 +28,8 @@ import {
 import { VolumeExplorer } from "@/components/chat/volume-explorer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, CheckIcon } from "lucide-react";
+import { AlertTriangle, CheckIcon, Plus } from "lucide-react";
+import { setPendingFiles } from "@/lib/pending-files";
 
 export const Route = createFileRoute("/_sidebar/chat/")({
   component: () => <ChatIndexPage />,
@@ -62,6 +63,14 @@ function ChatIndexContent() {
   );
   const [availableModels, setAvailableModels] = useState<{id: string; display_name: string}[]>([]);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const ACCEPTED_EXTENSIONS = [
+    ".txt",".md",".html",".htm",".css",".py",".yaml",".yml",".json",".xml",".csv",
+    ".js",".ts",".tsx",".jsx",".sh",".sql",".toml",".ini",".conf",".log",".rst",
+    ".tex",".r",".rb",".java",".c",".cpp",".h",".go",".rs",".scala",".kt",".swift",
+    ".png",".jpg",".jpeg",".gif",".webp",
+  ].join(",");
 
   useEffect(() => {
     fetch("/api/config")
@@ -79,13 +88,31 @@ function ChatIndexContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const MAX_ATTACHMENTS = 20;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    const files = selected.slice(0, MAX_ATTACHMENTS);
+    if (files.length === 0) return;
+
+    // ファイルをストアに保存して即座にスレッド画面へ遷移
+    setPendingFiles(files);
+    const threadId = crypto.randomUUID();
+    navigate({
+      to: "/chat/$threadId",
+      params: { threadId },
+      search: { q: undefined, files: undefined },
+    });
+  };
+
   const goToChat = (text: string) => {
     if (!text.trim()) return;
     const threadId = crypto.randomUUID();
     navigate({
       to: "/chat/$threadId",
       params: { threadId },
-      search: { q: text },
+      search: { q: text, files: undefined },
     });
   };
 
@@ -140,6 +167,24 @@ function ChatIndexContent() {
           </PromptInputBody>
           <PromptInputFooter>
             <PromptInputTools>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                type="button"
+                title="ファイルを添付"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Plus className="size-4" />
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept={ACCEPTED_EXTENSIONS}
+                multiple
+                onChange={handleFileChange}
+              />
               {availableModels.length > 0 && (
                 <ModelSelector open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
                   <ModelSelectorTrigger asChild>

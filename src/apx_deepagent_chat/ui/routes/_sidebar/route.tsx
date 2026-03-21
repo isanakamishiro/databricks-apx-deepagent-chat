@@ -213,7 +213,7 @@ function Layout() {
                       navigate({
                         to: "/chat/$threadId",
                         params: { threadId: chat.id },
-                        search: { q: undefined },
+                        search: { q: undefined, files: undefined },
                       })
                     }
                   >
