@@ -431,10 +431,8 @@ function ChatPage() {
       // Step 2: SSE で結果を受け取る（115秒ごとに自動再接続）
       let lastEventId = -1;
       let streamCompleted = false;
-      let shouldRestartStream = false;
 
       outerLoop: while (!streamCompleted) {
-        shouldRestartStream = false;
         if (ctrl.signal.aborted) break;
 
         const reconnectCtrl = new AbortController();
@@ -780,7 +778,6 @@ function ChatPage() {
                             jobId = newJobId;
                             currentJobIdRef.current = newJobId;
                             lastEventId = -1;
-                            shouldRestartStream = true;
                           } else {
                             streamCompleted = true;
                           }
