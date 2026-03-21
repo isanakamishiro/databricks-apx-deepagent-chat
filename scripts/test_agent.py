@@ -35,9 +35,9 @@ from apx_deepagent_chat.backend.agent.stream import process_agent_astream_events
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 # opentelemetry.attributes の警告（WARNING）を抑制
-logging.getLogger("opentelemetry.attributes").setLevel(logging.ERROR)
+# logging.getLogger("opentelemetry.attributes").setLevel(logging.ERROR)
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
-logging.getLogger("mlflow.tracing.export.async_export_queue").setLevel(logging.ERROR)
+# logging.getLogger("mlflow.tracing.export.async_export_queue").setLevel(logging.ERROR)
 
 # --- 設定 ---
 
@@ -269,5 +269,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
-    # asyncio.run(run_test_chatmodel())
+    # asyncio.run(main())
+    asyncio.run(run_test_chatmodel())

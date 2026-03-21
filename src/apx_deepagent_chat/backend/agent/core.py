@@ -309,8 +309,6 @@ async def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentRespon
                 "input_tokens": u.get("input_tokens", 0),
                 "output_tokens": u.get("output_tokens", 0),
                 "total_tokens": u.get("total_tokens", 0),
-                "input_tokens_details": {"cached_tokens": 0},
-                "output_tokens_details": {"reasoning_tokens": 0},
             }
 
     if error_msg is not None:

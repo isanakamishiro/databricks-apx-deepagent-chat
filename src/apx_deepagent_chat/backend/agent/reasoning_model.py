@@ -1,5 +1,6 @@
 from typing import Any, cast
 
+from langchain_core.messages.block_translators import register_translator
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_openai.chat_models.base import BaseChatOpenAI
 
@@ -7,6 +8,36 @@ from langchain_openai.chat_models.base import BaseChatOpenAI
 def _strip_index(block: dict) -> dict:
     """merge_lists() 用の内部フィールド "index" を除去する."""
     return {k: v for k, v in block.items() if k != "index"}
+
+
+def _translate_openai_with_reasoning(message) -> list:
+    """additional_kwargs["reasoning"] を content_blocks に含めるトランスレータ.
+
+    ストリーミング中は reasoning が additional_kwargs["reasoning"]（文字列）に
+    蓄積されるため、content_blocks プロパティアクセス時にここで変換する。
+    """
+    blocks: list = []
+    # reasoning ブロックを先頭に
+    reasoning = message.additional_kwargs.get("reasoning", "")
+    if reasoning:
+        blocks.append({"type": "reasoning", "reasoning": reasoning})
+    # content (str or list) を変換
+    content = message.content
+    if isinstance(content, str):
+        if content:
+            blocks.append({"type": "text", "text": content})
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict):
+                blocks.append(_strip_index(block))
+    return blocks
+
+
+register_translator(
+    "openai_with_reasoning",
+    _translate_openai_with_reasoning,
+    _translate_openai_with_reasoning,
+)
 
 
 class ChatOpenAIWithReasoning(BaseChatOpenAI):
@@ -96,16 +127,20 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
         return normalized
 
     def _normalize_result(self, result: ChatResult) -> ChatResult:
-        """ChatResult の全 generation の content を _normalize_content() で正規化する."""
-        result.generations = [
-            ChatGeneration(
-                message=gen.message.model_copy(
-                    update={"content": self._normalize_content(gen.message.content)}
-                ),
-                generation_info=gen.generation_info,
+        """ChatResult の全 generation の content を正規化する.
+
+        reasoning の content_blocks への変換はトランスレータが担当するため、
+        ここでは content の正規化のみ行う。
+        """
+        new_generations = []
+        for gen in result.generations:
+            new_msg = gen.message.model_copy(
+                update={"content": self._normalize_content(gen.message.content)}
             )
-            for gen in result.generations
-        ]
+            new_generations.append(
+                ChatGeneration(message=new_msg, generation_info=gen.generation_info)
+            )
+        result.generations = new_generations
         return result
 
     # Overrides _generate_with_cache() / _agenerate_with_cache() to normalize content blocks
@@ -132,12 +167,15 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
     # `_convert_delta_to_message_chunk()` (called by super) discards `reasoning` fields,
     # so we cannot inject reasoning at the higher `_stream()` / `_astream()` level.
     #
-    # "index" is added to reasoning/text blocks so that LangChain's merge_lists()
-    # merges same-index blocks during streaming accumulation (native deduplication).
+    # Reasoning text is stored in additional_kwargs["reasoning"] (string) during streaming
+    # rather than as a list in content, because LangChain passes content directly to
+    # on_llm_new_token as the `token` arg. MLflow records it as an OTel span event attribute
+    # named "token"; OTel rejects sequences containing dicts with a WARNING.
+    # Using additional_kwargs (merged via merge_dicts string concatenation) avoids this.
     def _convert_chunk_to_generation_chunk(
         self, chunk, default_chunk_class, base_generation_info
     ):
-        """ストリーミング: reasoningブロックをコンテンツリストに注入."""
+        """ストリーミング: reasoningテキストをadditional_kwargs["reasoning"]に格納."""
         gen_chunk = super()._convert_chunk_to_generation_chunk(
             chunk, default_chunk_class, base_generation_info
         )
@@ -150,32 +188,22 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
 
         delta = choices[0].get("delta") or {}
         reasoning_text = self._extract_reasoning_text(delta)
-        text_content = (
-            gen_chunk.message.content
-            if isinstance(gen_chunk.message.content, str)
-            else ""
-        )
 
-        # reasoning も text も無ければ変換不要
-        if not reasoning_text and not text_content:
+        # reasoning が無ければ変換不要（content は str のまま）
+        if not reasoning_text:
             return gen_chunk
 
-        blocks: list = []
-        if reasoning_text:
-            # "index": 0 により merge_lists() が同一チャンクをネイティブに統合する
-            blocks.append(
-                {"type": "reasoning", "reasoning": reasoning_text, "index": 0}
-            )
-        if text_content:
-            # "index": 1 により merge_lists() が同一チャンクをネイティブに統合する
-            blocks.append({"type": "text", "text": text_content, "index": 1})
-
+        # reasoning を additional_kwargs に蓄積（merge_dicts が文字列結合する）
+        new_additional_kwargs = {
+            **gen_chunk.message.additional_kwargs,
+            "reasoning": reasoning_text,
+        }
         new_msg = gen_chunk.message.model_copy(
             update={
-                "content": blocks,
+                "additional_kwargs": new_additional_kwargs,
                 "response_metadata": {
                     **gen_chunk.message.response_metadata,
-                    "output_version": "v1",
+                    "model_provider": "openai_with_reasoning",
                 },
             }
         )

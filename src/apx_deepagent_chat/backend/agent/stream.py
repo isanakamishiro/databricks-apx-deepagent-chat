@@ -153,10 +153,10 @@ def _process_main_agent_messages(
 
         # 計測点 C: AIMessageChunk の content_blocks の内容を記録
         logger.debug(
-            "[msg-chunk] id=%s output_version=%s n_blocks=%d "
+            "[msg-chunk] id=%s model_provider=%s n_blocks=%d "
             "block_types=%s reasoning_total=%d text_total=%d",
             chunk.id,
-            chunk.response_metadata.get("output_version"),
+            chunk.response_metadata.get("model_provider"),
             len(blocks),
             [b.get("type") for b in blocks if isinstance(b, dict)],
             sum(len(b.get("reasoning", "")) for b in blocks if isinstance(b, dict) and b.get("type") == "reasoning"),
@@ -168,7 +168,9 @@ def _process_main_agent_messages(
 
         item_id = chunk.id or str(uuid4())
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-        reasoning = "".join(b.get("reasoning", "") for b in blocks if b.get("type") == "reasoning")
+        reasoning = "".join(
+            b.get("reasoning", "") for b in blocks if b.get("type") == "reasoning"
+        )
 
         if text:
             state.accumulated_text += text
@@ -232,10 +234,14 @@ def _finalize_stream(
     output_tokens = ua.get("output_tokens", 0)
     usage_data: dict[str, Any] = {
         "input_tokens": total_tokens - output_tokens,
+        "input_tokens_details": {
+            "cached_tokens": ua.get("prompt_tokens_details", {}).get("cached_tokens", 0),
+        },
         "output_tokens": output_tokens,
+        "output_tokens_details": {
+            "reasoning_tokens": ua.get("completion_tokens_details", {}).get("reasoning_tokens", 0),
+        },
         "total_tokens": total_tokens,
-        "input_tokens_details": {"cached_tokens": 0},
-        "output_tokens_details": {"reasoning_tokens": 0},
     }
     response_data: dict[str, Any] = {
         "id": f"resp-{str(uuid4())[:8]}",
