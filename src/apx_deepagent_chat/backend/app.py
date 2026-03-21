@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from .._metadata import dist_dir
 from .agent import (  # also registers @invoke / @stream handlers
     _current_obo_token,
+    _injected_job_store,
     _injected_sp_ws_client,
     stream_handler,
 )
@@ -58,6 +59,8 @@ async def _run_agent_background(job_id: str, body: dict) -> None:
     if job is None:
         return
     job.status = "running"
+    # InterruptMiddleware が job_id を参照できるよう custom_inputs に注入する
+    body.setdefault("custom_inputs", {})["job_id"] = job_id
     try:
         with mlflow.start_span(name="run_agent", span_type="AGENT") as span:
             # MLflow Tracing の span に入力内容をタグ付けする。タグは後から MLflow UI で検索やフィルタリングに使える。
@@ -138,6 +141,10 @@ class ChatStartResponse(BaseModel):
     job_id: str
 
 
+class ChatInterruptResponse(BaseModel):
+    ok: bool
+
+
 # ─── アプリケーション生成 ─────────────────────────────────────────────────────
 
 
@@ -185,6 +192,7 @@ def create_server_app() -> FastAPI:
         obo_token = headers.token.get_secret_value() if headers.token else None
         _current_obo_token.set(obo_token)
         tok_sp = _injected_sp_ws_client.set(sp_client)
+        tok_js = _injected_job_store.set(_job_store)
 
         body = await request.json()
         job_id = str(uuid4())
@@ -195,8 +203,20 @@ def create_server_app() -> FastAPI:
         job.task = task
 
         _injected_sp_ws_client.reset(tok_sp)
+        _injected_job_store.reset(tok_js)
 
         return ChatStartResponse(job_id=job_id)
+
+    # ─── POST /api/chat/interrupt/{job_id} ───────────────────────────────────
+    @app.post(
+        "/api/chat/interrupt/{job_id}",
+        operation_id="chatInterrupt",
+        response_model=ChatInterruptResponse,
+    )
+    async def chat_interrupt(job_id: str):
+        """指定ジョブに割り込みフラグをセットする。次のモデル呼び出し完了後にストリームを停止する."""
+        _job_store.request_interrupt(job_id)
+        return ChatInterruptResponse(ok=True)
 
     # ─── GET /api/chat/stream/{job_id} ───────────────────────────────────────
     @app.get("/api/chat/stream/{job_id}")
