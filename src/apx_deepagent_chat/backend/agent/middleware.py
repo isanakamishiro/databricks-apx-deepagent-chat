@@ -1,9 +1,32 @@
 import asyncio
+from typing import TYPE_CHECKING, Any
 
-from langchain.agents.middleware import wrap_model_call, wrap_tool_call
+from langchain.agents.middleware import AgentMiddleware, Runtime, wrap_model_call, wrap_tool_call
 from langchain_core.messages import SystemMessage, ToolMessage
+from langgraph.types import interrupt as langgraph_interrupt
+
+if TYPE_CHECKING:
+    from .job_store import JobStore
 
 _tool_call_semaphore = asyncio.Semaphore(4)
+
+
+class InterruptMiddleware(AgentMiddleware):
+    """モデル呼び出し完了後に割り込みフラグをチェックし、セットされていれば LangGraph を正常停止させる."""
+
+    def __init__(self, job_id: str, job_store: "JobStore") -> None:
+        self.job_id = job_id
+        self.job_store = job_store
+
+    def after_model(self, state: Any, runtime: Runtime) -> None:
+        """モデル呼び出し完了後に割り込みフラグをチェック。
+        Trueならlanggraph_interruptを呼んでグラフを正常停止。"""
+        if self.job_store.is_interrupt_requested(self.job_id):
+            langgraph_interrupt({"reason": "user_interrupt"})
+        return None
+
+    async def aafter_model(self, state: Any, runtime: Runtime) -> None:
+        return self.after_model(state, runtime)
 
 
 @wrap_tool_call  # type: ignore[arg-type]

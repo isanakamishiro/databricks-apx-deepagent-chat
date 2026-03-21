@@ -28,10 +28,10 @@ from mlflow.types.responses import (
 from mlflow.types.responses_helpers import ResponseError
 
 from ..core._base import LifespanDependency
-from .clients import get_sp_workspace_client, get_user_workspace_client
+from .clients import get_injected_job_store, get_sp_workspace_client, get_user_workspace_client
 from .lc_tools import get_current_time, web_fetch, web_search
 from .mcp_tools import get_mcp_tools
-from .middleware import flatten_system_message, strip_content_block_ids
+from .middleware import InterruptMiddleware, flatten_system_message, strip_content_block_ids
 from .model_loader import (
     ASSETS_DIR,
     FAKE_MODEL_NAME,
@@ -227,6 +227,7 @@ async def init_agent(
     checkpointer=None,
     volume_path: Optional[str] = None,
     override_subagent_model: Optional[BaseChatModel] = None,
+    extra_middleware: Optional[list] = None,
 ):
 
     sp_ws_client = get_sp_workspace_client()
@@ -253,6 +254,7 @@ async def init_agent(
         strip_content_block_ids,
         flatten_system_message,
         create_summarization_tool_middleware(model, backend),
+        *(extra_middleware or []),
     ]
 
     subagents = _build_subagents(
@@ -342,12 +344,20 @@ async def stream_handler(
                 ws=user_workspace_client,
             )
             override_model = None if not USE_FAKE_MODEL else model
+            job_id = dict(request.custom_inputs or {}).get("job_id")
+            job_store = get_injected_job_store()
+            interrupt_mw = (
+                [InterruptMiddleware(job_id=str(job_id), job_store=job_store)]
+                if job_id and job_store
+                else []
+            )
             agent = await init_agent(
                 model=model,
                 workspace_client=user_workspace_client,
                 checkpointer=checkpointer,
                 volume_path=volume_path,
                 override_subagent_model=override_model,
+                extra_middleware=interrupt_mw,
             )
 
             all_messages = to_chat_completions_input(

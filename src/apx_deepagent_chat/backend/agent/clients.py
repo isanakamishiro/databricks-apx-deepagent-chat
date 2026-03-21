@@ -6,6 +6,8 @@ from typing import Optional
 from databricks.sdk import WorkspaceClient
 from mlflow.genai.agent_server import get_request_headers
 
+from .job_store import JobStore
+
 logger = logging.getLogger(__name__)
 
 # ─── Databricks クライアント依存注入 ─────────────────────────────────────────
@@ -19,6 +21,16 @@ _current_obo_token: ContextVar[str | None] = ContextVar(
 _injected_sp_ws_client: ContextVar[WorkspaceClient | None] = ContextVar(
     "_injected_sp_ws_client", default=None
 )
+
+# バックグラウンドジョブの JobStore を受け取る ContextVar
+_injected_job_store: ContextVar[JobStore | None] = ContextVar(
+    "_injected_job_store", default=None
+)
+
+
+def get_injected_job_store() -> Optional[JobStore]:
+    """注入された JobStore を返す（未設定の場合は None）."""
+    return _injected_job_store.get()
 
 
 def get_user_workspace_client() -> WorkspaceClient:

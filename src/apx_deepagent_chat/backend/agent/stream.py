@@ -399,6 +399,7 @@ async def process_agent_astream_events(
     _ua = usage_accumulator if usage_accumulator is not None else {}
     active_subagents: dict[str, dict] = {}  # tool_call_id -> subagent info
     seen_ns: set[str] = set()  # 既に subagent.start を発行した namespace
+    interrupted = False  # LangGraph interrupt() によるユーザー割り込みフラグ
 
     async for chunk in async_stream:
         chunk_type = chunk["type"]
@@ -407,6 +408,11 @@ async def process_agent_astream_events(
 
         if not ns:  # メインエージェント (ns == ())
             if chunk_type == "updates":
+                # LangGraph の interrupt() 呼び出し時に発行される __interrupt__ チャンクを検出
+                if "__interrupt__" in data:
+                    interrupted = True
+                    logger.debug("[stream] user interrupt detected")
+                    continue
                 _detect_subagent_starts(data, active_subagents)
                 for item in _process_main_agent_updates(data, _ua, state.output_items):
                     yield item
@@ -435,11 +441,26 @@ async def process_agent_astream_events(
                     yield item
 
     logger.debug(
-        "[stream] completed. accumulated_text_len=%d reasoning_len=%d output_items=%d",
+        "[stream] completed. accumulated_text_len=%d reasoning_len=%d output_items=%d interrupted=%s",
         len(state.accumulated_text),
         len(state.accumulated_reasoning),
         len(state.output_items),
+        interrupted,
     )
+
+    if interrupted:
+        # 割り込みによる停止: 部分応答を含む response.output_item.done のみ emit し、
+        # response.completed は発行しない。代わりに stream.interrupted を emit する。
+        max_input_tokens = model_profile.get("max_input_tokens") if model_profile else None
+        for item in _finalize_stream(state, _ua, model, max_input_tokens):
+            # response.completed は発行しない（stream.interrupted で代替）
+            if item.type == "response.completed":
+                break
+            yield item
+        yield _log_and_yield(
+            ResponsesAgentStreamEvent(type="stream.interrupted")
+        )
+        return
 
     max_input_tokens = model_profile.get("max_input_tokens") if model_profile else None
     for item in _finalize_stream(state, _ua, model, max_input_tokens):
