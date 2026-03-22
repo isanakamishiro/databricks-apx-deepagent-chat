@@ -39,14 +39,14 @@ class InterruptMiddleware(AgentMiddleware):
                 langgraph_interrupt({"reason": "user_interrupt"})
         return None
 
-    # def after_model(self, state: Any, runtime: Runtime) -> None:
-    #     return self.before_model(state, runtime)
+    def after_model(self, state: Any, runtime: Runtime) -> None:
+        return self.before_model(state, runtime)
 
     async def abefore_model(self, state: Any, runtime: Runtime) -> None:
         return self.before_model(state, runtime)
 
-    # async def aafter_model(self, state: Any, runtime: Runtime) -> None:
-    #     return self.after_model(state, runtime)
+    async def aafter_model(self, state: Any, runtime: Runtime) -> None:
+        return self.after_model(state, runtime)
 
 
 @wrap_tool_call  # type: ignore[arg-type]

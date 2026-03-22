@@ -82,6 +82,10 @@ class JobStore:
             job.error = error
             job.notify.set()
 
+    def all_jobs(self) -> list[Job]:
+        """全ジョブを返す."""
+        return list(self._jobs.values())
+
     def cleanup(self) -> None:
         """10分以上前に完了したジョブを削除する."""
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)

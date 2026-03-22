@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import signal
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from uuid import uuid4
@@ -82,12 +83,19 @@ async def _run_agent_background(job_id: str, body: dict) -> None:
             _job_store.mark_done(job_id)
             if data is not None:
                 span.set_outputs(data)
+    except asyncio.CancelledError:
+        # span.__exit__ は CancelledError でも呼ばれるのでスパンは正常クローズされる
+        _job_store.mark_error(job_id, "Interrupted by server shutdown")
+        raise
     except Exception:
         logger.exception("Background agent error for job %s", job_id)
         _job_store.mark_error(job_id, "Agent processing failed")
 
 
 # ─── SSE ジェネレータ ─────────────────────────────────────────────────────────
+
+# Databricks Apps の 120 秒 HTTP タイムアウトより先に接続をクローズする秒数
+_SSE_CLOSE_AFTER = 100.0
 
 
 async def _generate_sse(
@@ -99,11 +107,18 @@ async def _generate_sse(
         yield f"event: error\ndata: {json.dumps({'error': 'Job not found', 'type': 'error'})}\n\n"
         return
 
+    start_time = asyncio.get_event_loop().time()
     event_index = last_event_id + 1  # 次に送るべき event_id
 
     while True:
         # クライアント切断チェック
         if await request.is_disconnected():
+            break
+
+        # 100 秒経過したらフロントエンドに再接続を促してクローズ
+        elapsed = asyncio.get_event_loop().time() - start_time
+        if elapsed >= _SSE_CLOSE_AFTER:
+            yield f"event: stream.timeout\ndata: {json.dumps({'last_event_id': event_index - 1})}\n\n"
             break
 
         # 保留中のイベントをすべて送信
@@ -121,6 +136,11 @@ async def _generate_sse(
             yield f"event: error\ndata: {json.dumps({'error': error_msg, 'type': 'error'})}\n\n"
             break
 
+        # 残り時間を計算（これを超えて待機しない）
+        remaining = _SSE_CLOSE_AFTER - (asyncio.get_event_loop().time() - start_time)
+        if remaining <= 0:
+            continue
+
         # 新イベント待機（race condition 安全パターン）
         job.notify.clear()
         # clear と wait の間に到着したイベントをキャッチ
@@ -129,10 +149,14 @@ async def _generate_sse(
         if job.status in ("done", "error"):
             continue
 
-        # 30秒タイムアウトで待機、タイムアウト時は keepalive コメントを送信
+        # min(30秒, 残り時間) でタイムアウト待機、タイムアウト時は keepalive コメントを送信
         try:
-            await asyncio.wait_for(job.notify.wait(), timeout=30.0)
+            await asyncio.wait_for(job.notify.wait(), timeout=min(30.0, remaining))
         except asyncio.TimeoutError:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed >= _SSE_CLOSE_AFTER:
+                yield f"event: stream.timeout\ndata: {json.dumps({'last_event_id': event_index - 1})}\n\n"
+                break
             yield ": keepalive\n\n"
 
 
@@ -166,6 +190,29 @@ def create_server_app() -> FastAPI:
     @asynccontextmanager
     async def _composed_lifespan(app):
         cleanup_task = asyncio.create_task(_periodic_cleanup(_job_store))
+
+        async def _graceful_shutdown() -> None:
+            """SIGTERM 受信時に実行中ジョブをキャンセルし MLflow トレースをフラッシュする."""
+            tasks_to_cancel = [
+                job.task
+                for job in _job_store.all_jobs()
+                if job.task and not job.task.done()
+            ]
+            for task in tasks_to_cancel:
+                task.cancel()
+            if tasks_to_cancel:
+                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+            try:
+                mlflow.flush_async_logging()
+            except Exception:
+                logger.exception("MLflow flush error during shutdown")
+
+        loop = asyncio.get_event_loop()
+        loop.add_signal_handler(
+            signal.SIGTERM,
+            lambda: asyncio.ensure_future(_graceful_shutdown()),
+        )
+
         try:
             async with _chain_dep_lifespans(_all_deps, app):
                 yield

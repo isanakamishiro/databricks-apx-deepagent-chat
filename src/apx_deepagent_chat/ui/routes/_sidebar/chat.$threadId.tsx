@@ -858,6 +858,9 @@ function ChatPage() {
                       }
                       return updated;
                     });
+                  } else if (resolvedType === "stream.timeout") {
+                    // バックエンドが 100 秒制限でクローズ → outerLoop が即座に再接続する
+                    shouldBreakReader = true;
                   } else if (resolvedType === "error" && (data.error || data.message)) {
                     streamCompleted = true; // エラーもストリーム終了として扱う
                     setMessages((prev) => {
