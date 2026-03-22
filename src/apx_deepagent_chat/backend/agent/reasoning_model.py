@@ -129,13 +129,23 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
     def _normalize_result(self, result: ChatResult) -> ChatResult:
         """ChatResult の全 generation の content を正規化する.
 
+        content がリスト（非ストリーミング時に _create_chat_result が設定）の場合のみ正規化する。
+        ストリーミング後の string content はそのまま保持する。
+        string content をリストに変換すると MLflow tracing の Pydantic モデル（content: str）が
+        PydanticSerializationUnexpectedValue を発生させ、OTel の token 属性に dict が混入する。
+
         reasoning の content_blocks への変換はトランスレータが担当するため、
         ここでは content の正規化のみ行う。
         """
         new_generations = []
         for gen in result.generations:
+            content = gen.message.content
+            if not isinstance(content, list):
+                # string content はそのまま保持（MLflow tracing 互換性のため）
+                new_generations.append(gen)
+                continue
             new_msg = gen.message.model_copy(
-                update={"content": self._normalize_content(gen.message.content)}
+                update={"content": self._normalize_content(content)}
             )
             new_generations.append(
                 ChatGeneration(message=new_msg, generation_info=gen.generation_info)
