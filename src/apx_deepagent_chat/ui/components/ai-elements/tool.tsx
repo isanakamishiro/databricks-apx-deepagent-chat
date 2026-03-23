@@ -31,6 +31,7 @@ export const Tool = ({ className, ...props }: ToolProps) => (
 
 export type ToolHeaderProps = {
   title?: string;
+  subtitle?: string;
   type: ToolUIPart["type"];
   state: ToolUIPart["state"];
   className?: string;
@@ -68,6 +69,7 @@ const getStatusBadge = (status: ToolUIPart["state"]) => {
 export const ToolHeader = ({
   className,
   title,
+  subtitle,
   type,
   state,
   ...props
@@ -79,14 +81,19 @@ export const ToolHeader = ({
     )}
     {...props}
   >
-    <div className="flex items-center gap-2">
-      <WrenchIcon className="size-4 text-muted-foreground" />
-      <span className="font-medium text-sm">
+    <div className="flex min-w-0 items-center gap-2">
+      <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="shrink-0 font-medium text-sm">
         {title ?? type.split("-").slice(1).join("-")}
       </span>
-      {getStatusBadge(state)}
+      {subtitle && (
+        <span className="ml-2 truncate text-xs text-muted-foreground">{subtitle}</span>
+      )}
     </div>
-    <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+    <div className="flex shrink-0 items-center gap-2">
+      {getStatusBadge(state)}
+      <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+    </div>
   </CollapsibleTrigger>
 );
 

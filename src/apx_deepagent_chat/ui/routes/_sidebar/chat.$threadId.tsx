@@ -1352,10 +1352,15 @@ function ChatContent({
                       } catch {
                         parsedArgs = { raw: block.arguments };
                       }
+                      const firstArgValue = Object.values(parsedArgs)[0];
+                      const toolSubtitle = firstArgValue !== undefined && !Array.isArray(firstArgValue)
+                        ? (() => { const s = typeof firstArgValue === "string" ? firstArgValue : JSON.stringify(firstArgValue); return s.length > 80 ? s.slice(0, 80) + "..." : s; })()
+                        : undefined;
                       return (
                         <Tool key={`t-${bi}`}>
                           <ToolHeader
                             title={block.name}
+                            subtitle={toolSubtitle}
                             type="tool-call"
                             state={block.state}
                           />
@@ -1420,10 +1425,15 @@ function ChatContent({
                           } catch {
                             parsedArgs = { raw: block.arguments };
                           }
+                          const firstArgValue = Object.values(parsedArgs)[0];
+                          const toolSubtitle = firstArgValue !== undefined
+                            ? (() => { const s = typeof firstArgValue === "string" ? firstArgValue : JSON.stringify(firstArgValue); return s.length > 80 ? s.slice(0, 80) + "..." : s; })()
+                            : undefined;
                           return (
                             <Tool key={`t-${bi}`}>
                               <ToolHeader
                                 title={block.name}
+                                subtitle={toolSubtitle}
                                 type="tool-call"
                                 state={block.state}
                               />
