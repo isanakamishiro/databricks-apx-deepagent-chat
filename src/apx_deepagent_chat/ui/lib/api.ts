@@ -12,6 +12,10 @@ export class ApiError extends Error {
         this.body = body;
     }
 }
+export interface ApproveDecision {
+    message?: string | null;
+    type: "approve" | "reject";
+}
 export interface Body_filesUpload {
     file: string;
     path: string;
@@ -21,6 +25,12 @@ export interface Body_filesUploadAttachment {
 }
 export interface CatalogOut {
     name: string;
+}
+export interface ChatApproveRequest {
+    decisions: ApproveDecision[];
+}
+export interface ChatApproveResponse {
+    ok: boolean;
 }
 export interface ChatInterruptResponse {
     ok: boolean;
@@ -642,6 +652,48 @@ export function useSaveMessages(options?: {
 }) {
     return useMutation({
         mutationFn: (vars)=>saveMessages(vars.params, vars.data),
+        ...options?.mutation
+    });
+}
+export interface ChatApproveParams {
+    job_id: string;
+}
+export const chatApprove = async (params: ChatApproveParams, data: ChatApproveRequest, options?: RequestInit): Promise<{
+    data: ChatApproveResponse;
+}> =>{
+    const res = await fetch(`/api/chat/approve/${params.job_id}`, {
+        ...options,
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            ...options?.headers
+        },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export function useChatApprove(options?: {
+    mutation?: UseMutationOptions<{
+        data: ChatApproveResponse;
+    }, ApiError, {
+        params: ChatApproveParams;
+        data: ChatApproveRequest;
+    }>;
+}) {
+    return useMutation({
+        mutationFn: (vars)=>chatApprove(vars.params, vars.data),
         ...options?.mutation
     });
 }

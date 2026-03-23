@@ -27,6 +27,9 @@ class Job:
     task: Optional[asyncio.Task] = None
     interrupt_requested: bool = False
     subagent_interrupt_requested: bool = False
+    # HITL tool approval
+    approval_event: asyncio.Event = field(default_factory=asyncio.Event)
+    approval_decisions: Optional[list[dict]] = None
 
 
 class JobStore:
@@ -68,6 +71,27 @@ class JobStore:
         """指定ジョブのサブエージェント割り込みフラグを返す."""
         job = self._jobs.get(job_id)
         return job.subagent_interrupt_requested if job else False
+
+    async def wait_for_approval(self, job_id: str) -> Optional[list[dict]]:
+        """ツール承認を待機する。割り込みが要求された場合は None を返す."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        job.approval_event.clear()
+        while True:
+            try:
+                await asyncio.wait_for(job.approval_event.wait(), timeout=1.0)
+                return job.approval_decisions or []
+            except asyncio.TimeoutError:
+                if job.interrupt_requested:
+                    return None
+
+    def set_approval(self, job_id: str, decisions: list[dict]) -> None:
+        """フロントエンドからの承認決定を受け取り、待機中のタスクを再開する."""
+        job = self._jobs.get(job_id)
+        if job:
+            job.approval_decisions = decisions
+            job.approval_event.set()
 
     def mark_done(self, job_id: str) -> None:
         job = self._jobs.get(job_id)

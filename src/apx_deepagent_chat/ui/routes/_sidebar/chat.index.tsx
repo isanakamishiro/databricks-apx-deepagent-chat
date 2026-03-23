@@ -28,8 +28,9 @@ import {
 import { VolumeExplorer } from "@/components/chat/volume-explorer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, CheckIcon, Plus } from "lucide-react";
+import { AlertTriangle, CheckIcon, Eye, Plus, Zap } from "lucide-react";
 import { setPendingFiles } from "@/lib/pending-files";
+import { getApprovalMode, setApprovalMode, type ApprovalMode } from "@/lib/approval-mode";
 
 export const Route = createFileRoute("/_sidebar/chat/")({
   component: () => <ChatIndexPage />,
@@ -63,6 +64,7 @@ function ChatIndexContent() {
   );
   const [availableModels, setAvailableModels] = useState<{id: string; display_name: string}[]>([]);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const [approvalMode, setApprovalModeState] = useState<ApprovalMode>(getApprovalMode);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const ACCEPTED_EXTENSIONS = [
@@ -222,6 +224,21 @@ function ChatIndexContent() {
                 </ModelSelector>
               )}
               <VolumeExplorer value={volumePath} onSelect={handleVolumeSelect} />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs gap-1"
+                type="button"
+                title={approvalMode === "auto" ? "自動承認モード (クリックで確認モードに切替)" : "確認モード (クリックで自動承認に切替)"}
+                onClick={() => {
+                  const next: ApprovalMode = approvalMode === "auto" ? "ask" : "auto";
+                  setApprovalModeState(next);
+                  setApprovalMode(next);
+                }}
+              >
+                {approvalMode === "auto" ? <Zap className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {approvalMode === "auto" ? "Auto" : "Ask"}
+              </Button>
             </PromptInputTools>
             <PromptInputSubmit />
           </PromptInputFooter>

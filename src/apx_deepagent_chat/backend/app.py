@@ -54,8 +54,11 @@ async def _periodic_cleanup(store: JobStore, interval: int = 300) -> None:
 
 
 async def _run_agent_background(job_id: str, body: dict) -> None:
-    """エージェントをバックグラウンドで実行し、イベントを JobStore に蓄積する."""
+    """エージェントをバックグラウンドで実行し、イベントを JobStore に蓄積する.
 
+    HITL 承認が必要な場合は tool.approval_required イベントを発行し、
+    ユーザー応答を待ってから Command(resume=...) でエージェントを再開する。
+    """
     job = _job_store.get_job(job_id)
     if job is None:
         return
@@ -64,27 +67,58 @@ async def _run_agent_background(job_id: str, body: dict) -> None:
     body.setdefault("custom_inputs", {})["job_id"] = job_id
     try:
         with mlflow.start_span(name="run_agent", span_type="AGENT") as span:
-            # MLflow Tracing の span に入力内容をタグ付けする。タグは後から MLflow UI で検索やフィルタリングに使える。
-            input = body.get("input", [])
+            input_msgs = body.get("input", [])
             span_input = body
-            # Find the last human message
-            for message in reversed(input):
+            for message in reversed(input_msgs):
                 if message.get("role") == "user":
                     span_input = message.get("content", "")
                     break
             span.set_inputs(span_input)
 
-            agent_request = ResponsesAgentRequest(**body)
-            data = None
-            async for event in stream_handler(agent_request):
-                event_type = str(event.type) if hasattr(event, "type") else ""
-                data = event.model_dump(mode="json")
-                _job_store.append_event(job_id, event_type, data)
-            _job_store.mark_done(job_id)
-            if data is not None:
-                span.set_outputs(data)
+            current_body = body
+            last_data = None
+
+            while True:
+                hitl_requests = None
+                agent_request = ResponsesAgentRequest(**current_body)
+                gen = stream_handler(agent_request)
+                try:
+                    async for event in gen:
+                        event_type = str(event.type) if hasattr(event, "type") else ""
+                        if event_type == "__tool_approval_interrupt__":
+                            # HITL 割り込み: tool.approval_required をフロントへ配信
+                            hitl_requests = (event.custom_outputs or {}).get("requests", [])
+                            break
+                        data = event.model_dump(mode="json")
+                        last_data = data
+                        _job_store.append_event(job_id, event_type, data)
+                finally:
+                    await gen.aclose()
+
+                if hitl_requests is None:
+                    # 正常完了
+                    _job_store.mark_done(job_id)
+                    break
+
+                # HITL 承認待ち: tool.approval_required を配信して待機
+                _job_store.append_event(
+                    job_id, "tool.approval_required", {"requests": hitl_requests}
+                )
+                decisions = await _job_store.wait_for_approval(job_id)
+
+                if decisions is None:
+                    # ユーザーが割り込み (スレッド切り替え等) → 終了
+                    _job_store.mark_done(job_id)
+                    break
+
+                # 再開: resume_decisions を custom_inputs に注入して再呼び出し
+                current_body = dict(body)
+                current_body["custom_inputs"] = dict(body.get("custom_inputs", {}))
+                current_body["custom_inputs"]["resume_decisions"] = decisions
+
+            if last_data is not None:
+                span.set_outputs(last_data)
     except asyncio.CancelledError:
-        # span.__exit__ は CancelledError でも呼ばれるのでスパンは正常クローズされる
         _job_store.mark_error(job_id, "Interrupted by server shutdown")
         raise
     except Exception:
@@ -169,6 +203,9 @@ class ChatStartResponse(BaseModel):
 
 class ChatInterruptResponse(BaseModel):
     ok: bool
+
+
+from .models import ChatApproveRequest, ChatApproveResponse  # noqa: E402
 
 
 # ─── アプリケーション生成 ─────────────────────────────────────────────────────
@@ -266,6 +303,17 @@ def create_server_app() -> FastAPI:
         """指定ジョブに割り込みフラグをセットする。deep=True のときはサブエージェントも停止する（停止ボタン用）."""
         _job_store.request_interrupt(job_id, deep=deep)
         return ChatInterruptResponse(ok=True)
+
+    # ─── POST /api/chat/approve/{job_id} ─────────────────────────────────────
+    @app.post(
+        "/api/chat/approve/{job_id}",
+        operation_id="chatApprove",
+        response_model=ChatApproveResponse,
+    )
+    async def chat_approve(job_id: str, body: ChatApproveRequest):
+        """HITL ツール承認の決定を受け取り、待機中のエージェントを再開する."""
+        _job_store.set_approval(job_id, [d.model_dump() for d in body.decisions])
+        return ChatApproveResponse(ok=True)
 
     # ─── GET /api/chat/stream/{job_id} ───────────────────────────────────────
     @app.get("/api/chat/stream/{job_id}")

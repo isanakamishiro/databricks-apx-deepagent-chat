@@ -1,7 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SubAgentBlock, type SubAgentBlockData } from "@/components/chat/subagent-block";
-import { AlertCircle, Copy, MessageSquare, RefreshCw, Plus } from "lucide-react";
+import { ToolApproval } from "@/components/chat/tool-approval";
+import { AlertCircle, Copy, Eye, MessageSquare, RefreshCw, Plus, Zap } from "lucide-react";
+import { chatApprove } from "@/lib/api";
+import { getApprovalMode, setApprovalMode, type ApprovalMode } from "@/lib/approval-mode";
 import { type UploadedAttachment } from "@/components/chat/attachment-panel";
 import { nanoid } from "nanoid";
 import { takePendingFiles } from "@/lib/pending-files";
@@ -100,10 +103,21 @@ type TextBlock = {
   content: string;
 };
 
+type ApprovalBlock = {
+  type: "approval";
+  batchId: string;
+  batchIndex: number;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  state: "approval-requested" | "approval-responded";
+  approved?: boolean;
+};
+
 type ChatBlock =
   | (ToolCallBlock & { type: "tool" })
   | (SubAgentBlockData & { type: "subagent" })
-  | TextBlock;
+  | TextBlock
+  | ApprovalBlock;
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -243,6 +257,18 @@ function ChatPage() {
   messageQueueRef.current = messageQueue;
   const currentJobIdRef = useRef<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [approvalMode, setApprovalModeState] = useState<ApprovalMode>(getApprovalMode);
+  const approvalModeRef = useRef<ApprovalMode>(approvalMode);
+  approvalModeRef.current = approvalMode;
+  const [alwaysApprovedTools, setAlwaysApprovedTools] = useState<Set<string>>(new Set());
+  const alwaysApprovedToolsRef = useRef<Set<string>>(alwaysApprovedTools);
+  alwaysApprovedToolsRef.current = alwaysApprovedTools;
+  const pendingApprovalRef = useRef<{
+    jobId: string;
+    batchId: string;
+    decisions: ({ type: "approve" | "reject" } | null)[];
+    pendingCount: number;
+  } | null>(null);
 
   const [volumePath, setVolumePath] = useState(
     () => localStorage.getItem(STORAGE_KEY_VOLUME) ?? ""
@@ -295,6 +321,8 @@ function ChatPage() {
       setMessageQueue([]);
       messageQueueRef.current = [];
       currentJobIdRef.current = null;
+      setAlwaysApprovedTools(new Set());
+      alwaysApprovedToolsRef.current = new Set();
     }
 
     if (!userId) return;
@@ -858,6 +886,71 @@ function ChatPage() {
                       }
                       return updated;
                     });
+                  } else if (resolvedType === "tool.approval_required") {
+                    const { requests } = data as {
+                      requests: Array<{
+                        tool_name: string;
+                        tool_args: Record<string, unknown>;
+                        index: number;
+                      }>;
+                    };
+                    const currentJobId = currentJobIdRef.current;
+                    if (!currentJobId || !requests?.length) continue;
+
+                    const batchId = crypto.randomUUID();
+                    const batchDecisions: ({ type: "approve" | "reject" } | null)[] =
+                      Array(requests.length).fill(null);
+                    let pendingCount = 0;
+
+                    for (let ri = 0; ri < requests.length; ri++) {
+                      const req = requests[ri];
+                      const isAutoApprove =
+                        approvalModeRef.current === "auto" ||
+                        alwaysApprovedToolsRef.current.has(req.tool_name);
+
+                      const blockBase: ApprovalBlock = {
+                        type: "approval" as const,
+                        batchId,
+                        batchIndex: ri,
+                        toolName: req.tool_name,
+                        toolArgs: req.tool_args,
+                        state: isAutoApprove ? ("approval-responded" as const) : ("approval-requested" as const),
+                        approved: isAutoApprove ? true : undefined,
+                      };
+
+                      if (isAutoApprove) {
+                        batchDecisions[ri] = { type: "approve" };
+                      } else {
+                        pendingCount++;
+                      }
+
+                      const block = blockBase;
+                      setMessages((prev) => {
+                        const updated = [...prev];
+                        const last = updated[updated.length - 1];
+                        if (last?.role === "assistant") {
+                          updated[updated.length - 1] = {
+                            ...last,
+                            blocks: [...(last.blocks ?? []), block],
+                          };
+                        }
+                        return updated;
+                      });
+                    }
+
+                    if (pendingCount === 0) {
+                      chatApprove(
+                        { job_id: currentJobId },
+                        { decisions: batchDecisions as { type: "approve" | "reject" }[] }
+                      ).catch(() => {});
+                    } else {
+                      pendingApprovalRef.current = {
+                        jobId: currentJobId,
+                        batchId,
+                        decisions: batchDecisions,
+                        pendingCount,
+                      };
+                    }
                   } else if (resolvedType === "stream.timeout") {
                     // バックエンドが 100 秒制限でクローズ → outerLoop が即座に再接続する
                     shouldBreakReader = true;
@@ -947,6 +1040,58 @@ function ChatPage() {
       setMessages((prev) => prev.slice(0, -1));
       handleSubmit(lastUser.content);
     }
+  };
+
+  const handleApprovalDecide = (
+    batchId: string,
+    batchIndex: number,
+    decision: "approve" | "reject",
+    alwaysApprove: boolean,
+    toolName: string
+  ) => {
+    const batch = pendingApprovalRef.current;
+    if (!batch || batch.batchId !== batchId) return;
+
+    if (alwaysApprove) {
+      const newSet = new Set(alwaysApprovedToolsRef.current);
+      newSet.add(toolName);
+      setAlwaysApprovedTools(newSet);
+      alwaysApprovedToolsRef.current = newSet;
+    }
+
+    batch.decisions[batchIndex] = { type: decision };
+    batch.pendingCount--;
+
+    // ブロックの状態を更新
+    setMessages((prev) => {
+      const updated = [...prev];
+      const last = updated[updated.length - 1];
+      if (last?.role === "assistant") {
+        updated[updated.length - 1] = {
+          ...last,
+          blocks: (last.blocks ?? []).map((b) =>
+            b.type === "approval" && b.batchId === batchId && b.batchIndex === batchIndex
+              ? { ...b, state: "approval-responded" as const, approved: decision === "approve" }
+              : b
+          ),
+        };
+      }
+      return updated;
+    });
+
+    if (batch.pendingCount === 0) {
+      chatApprove(
+        { job_id: batch.jobId },
+        { decisions: batch.decisions as { type: "approve" | "reject" }[] }
+      ).catch(() => {});
+      pendingApprovalRef.current = null;
+    }
+  };
+
+  const handleApprovalModeChange = (mode: ApprovalMode) => {
+    setApprovalModeState(mode);
+    approvalModeRef.current = mode;
+    setApprovalMode(mode);
   };
 
   // search.q による初期メッセージの自動送信
@@ -1050,6 +1195,9 @@ function ChatPage() {
         onAttachmentAdd={handleAttachmentAdd}
         onAttachmentRemove={handleAttachmentRemove}
         onAttachmentUpdate={handleAttachmentUpdate}
+        approvalMode={approvalMode}
+        onApprovalModeChange={handleApprovalModeChange}
+        onApprovalDecide={handleApprovalDecide}
       />
     </PromptInputProvider>
   );
@@ -1076,6 +1224,9 @@ type ChatContentProps = {
   onAttachmentAdd: (attachment: UploadedAttachment) => void;
   onAttachmentRemove: (id: string) => void;
   onAttachmentUpdate: (id: string, updates: Partial<UploadedAttachment>) => void;
+  approvalMode: ApprovalMode;
+  onApprovalModeChange: (mode: ApprovalMode) => void;
+  onApprovalDecide: (batchId: string, batchIndex: number, decision: "approve" | "reject", alwaysApprove: boolean, toolName: string) => void;
 };
 
 function ChatContent({
@@ -1097,6 +1248,9 @@ function ChatContent({
   onAttachmentAdd,
   onAttachmentRemove,
   onAttachmentUpdate,
+  approvalMode,
+  onApprovalModeChange,
+  onApprovalDecide,
 }: ChatContentProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const waitMessageRef = useRef<string>(getRandomWaitMessage());
@@ -1279,6 +1433,17 @@ function ChatContent({
             </ModelSelector>
           )}
           <VolumeExplorer value={volumePath} onSelect={onVolumeSelect} />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs gap-1"
+            type="button"
+            title={approvalMode === "auto" ? "自動承認モード (クリックで確認モードに切替)" : "確認モード (クリックで自動承認に切替)"}
+            onClick={() => onApprovalModeChange(approvalMode === "auto" ? "ask" : "auto")}
+          >
+            {approvalMode === "auto" ? <Zap className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {approvalMode === "auto" ? "Auto" : "Ask"}
+          </Button>
         </PromptInputTools>
         <PromptInputSubmit
           status={stopping ? "submitted" : streaming ? "streaming" : undefined}
@@ -1342,6 +1507,20 @@ function ChatContent({
                           <SubAgentBlock
                             key={`sa-${bi}`}
                             block={block}
+                          />
+                        );
+                      }
+                      if (block.type === "approval") {
+                        return (
+                          <ToolApproval
+                            key={`ap-${bi}`}
+                            toolName={block.toolName}
+                            toolArgs={block.toolArgs}
+                            state={block.state}
+                            approved={block.approved}
+                            onApprove={() => onApprovalDecide(block.batchId, block.batchIndex, "approve", false, block.toolName)}
+                            onReject={() => onApprovalDecide(block.batchId, block.batchIndex, "reject", false, block.toolName)}
+                            onAlwaysApprove={() => onApprovalDecide(block.batchId, block.batchIndex, "approve", true, block.toolName)}
                           />
                         );
                       }

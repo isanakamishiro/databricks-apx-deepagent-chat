@@ -1,0 +1,12 @@
+# Human-in-the-Loop 自動承認ツール許可リスト
+#
+# ここに記載されたツールは確認なしに自動実行されます。
+# 記載されていないツールは ask モード時にユーザー確認を求めます。
+allows:
+  - get_current_time
+  - task
+  - write_todos
+  - ls
+  - read_file
+  - glob
+  - grep

@@ -363,6 +363,41 @@ def _resolve_subagent_name(
     return "unknown", ""
 
 
+# ─── HITL 割り込み検出ユーティリティ ─────────────────────────────────────────
+
+
+def _is_user_interrupt(interrupt_list: Any) -> bool:
+    """InterruptMiddleware からの user_interrupt かどうかを判定する."""
+    if not isinstance(interrupt_list, (list, tuple)):
+        return False
+    for item in interrupt_list:
+        value = item.value if hasattr(item, "value") else (item.get("value") if isinstance(item, dict) else None)
+        if isinstance(value, dict) and value.get("reason") == "user_interrupt":
+            return True
+    return False
+
+
+def _make_hitl_interrupt_event(interrupt_list: Any) -> ResponsesAgentStreamEvent:
+    """HITL 割り込みから __tool_approval_interrupt__ SSE イベントを生成する."""
+    requests = []
+    for item in interrupt_list:
+        value = item.value if hasattr(item, "value") else (item.get("value") if isinstance(item, dict) else {})
+        interrupt_id = item.id if hasattr(item, "id") else str(uuid4())
+        if isinstance(value, dict) and "action_requests" in value:
+            for req_idx, req in enumerate(value.get("action_requests", [])):
+                requests.append({
+                    "interrupt_id": interrupt_id,
+                    "tool_name": req.get("name", "unknown"),
+                    "tool_args": req.get("args", {}),
+                    "description": req.get("description", ""),
+                    "index": req_idx,
+                })
+    return ResponsesAgentStreamEvent(
+        type="__tool_approval_interrupt__",
+        custom_outputs={"requests": requests},
+    )
+
+
 # ─── メインのストリーム処理関数 ──────────────────────────────────────────────
 
 
@@ -410,8 +445,15 @@ async def process_agent_astream_events(
             if chunk_type == "updates":
                 # LangGraph の interrupt() 呼び出し時に発行される __interrupt__ チャンクを検出
                 if "__interrupt__" in data:
-                    interrupted = True
-                    logger.debug("[stream] user interrupt detected")
+                    interrupt_list = data["__interrupt__"]
+                    if _is_user_interrupt(interrupt_list):
+                        interrupted = True
+                        logger.debug("[stream] user interrupt detected")
+                    else:
+                        # HITL tool approval interrupt
+                        logger.debug("[stream] tool approval interrupt detected")
+                        yield _make_hitl_interrupt_event(interrupt_list)
+                        return  # response.completed は発行しない
                     continue
                 _detect_subagent_starts(data, active_subagents)
                 for item in _process_main_agent_updates(data, _ua, state.output_items):

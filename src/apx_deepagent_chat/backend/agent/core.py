@@ -18,6 +18,7 @@ from deepagents.middleware.summarization import (
 )
 from langchain.agents.middleware import ToolCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
+from langgraph.types import Command
 from mlflow.genai.agent_server import invoke, stream
 from mlflow.types.responses import (
     ResponsesAgentRequest,
@@ -49,6 +50,7 @@ mlflow.config.enable_async_logging()
 
 _SYSTEM_PROMPT_PATH = ASSETS_DIR / "system_prompt.md"
 _SUBAGENTS_CONFIG_PATH = ASSETS_DIR / "subagents.yaml"
+_HITL_WHITELIST_PATH = ASSETS_DIR / "hitl_whitelist.yaml"
 _TEXT_SUFFIXES = {".md", ".py", ".txt"}
 
 logger = logging.getLogger(__name__)
@@ -110,6 +112,18 @@ def _get_or_create_thread_id(request: ResponsesAgentRequest) -> str:
         return str(request.context.conversation_id)
 
     return str(uuid_utils.uuid7())
+
+
+@functools.cache
+def _load_hitl_config() -> frozenset[str]:
+    """HITL 許可リストを読み込み、自動承認ツール名のセットを返す（キャッシュ付き）."""
+    try:
+        with open(_HITL_WHITELIST_PATH) as f:
+            config = yaml.safe_load(f)
+        return frozenset(config.get("allows", []))
+    except FileNotFoundError:
+        logger.warning("[hitl] whitelist not found, all tools will require approval")
+        return frozenset()
 
 
 @functools.cache
@@ -259,6 +273,16 @@ async def init_agent(
             },
         )
 
+    all_tools = mcp_tools + [web_search, web_fetch, get_current_time]
+    allowed_tools = _load_hitl_config()
+    from langchain.agents.middleware.human_in_the_loop import InterruptOnConfig  # noqa: PLC0415
+
+    interrupt_on: dict[str, bool | InterruptOnConfig] = {
+        t.name: True
+        for t in all_tools
+        if t.name not in allowed_tools
+    }
+
     middleware = [
         strip_content_block_ids,
         flatten_system_message,
@@ -275,12 +299,7 @@ async def init_agent(
     )
 
     return create_deep_agent(
-        tools=mcp_tools
-        + [
-            web_search,
-            web_fetch,
-            get_current_time,
-        ],
+        tools=all_tools,
         system_prompt=_load_system_prompt(_SYSTEM_PROMPT_PATH),
         memory=["AGENTS.md"],
         skills=["/preset/skills/", "skills/"],
@@ -289,6 +308,7 @@ async def init_agent(
         subagents=subagents,
         checkpointer=checkpointer,
         middleware=middleware,
+        interrupt_on=interrupt_on,
     )
 
 
@@ -373,15 +393,23 @@ async def stream_handler(
                 job_store=job_store,
             )
 
-            all_messages = to_chat_completions_input(
-                [i.model_dump() for i in request.input]
-            )
-            # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
-            input_state = {
-                "messages": [all_messages[-1]] if all_messages else [],
-                "custom_inputs": dict(request.custom_inputs or {}),
-                "files": _load_preset_files(),
-            }
+            ci = dict(request.custom_inputs or {})
+            resume_decisions = ci.get("resume_decisions")
+
+            if resume_decisions:
+                # HITL 承認後の再開: Command(resume=...) でチェックポイントから継続
+                agent_input: Any = Command(resume={"decisions": resume_decisions})
+            else:
+                all_messages = to_chat_completions_input(
+                    [i.model_dump() for i in request.input]
+                )
+                # checkpointer が会話履歴を保持するため、最後のメッセージのみ渡す
+                agent_input = {
+                    "messages": [all_messages[-1]] if all_messages else [],
+                    "custom_inputs": ci,
+                    "files": _load_preset_files(),
+                }
+
             config = {
                 "configurable": {"thread_id": thread_id, "model_name": model_name}
             }
@@ -393,7 +421,7 @@ async def stream_handler(
             }
             async for event in process_agent_astream_events(
                 agent.astream(
-                    input=input_state,
+                    input=agent_input,
                     config=config,
                     stream_mode=["updates", "messages"],
                     subgraphs=True,
