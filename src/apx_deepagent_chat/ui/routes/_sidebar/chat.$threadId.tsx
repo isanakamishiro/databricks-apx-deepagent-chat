@@ -1376,8 +1376,8 @@ function ChatContent({
           disabled={isLoadingHistory}
         />
       </PromptInputBody>
-      <PromptInputFooter>
-        <PromptInputTools>
+      <PromptInputFooter className="items-end">
+        <PromptInputTools className="flex-1 min-w-0 flex-wrap">
           <Button
             variant="ghost"
             size="sm"

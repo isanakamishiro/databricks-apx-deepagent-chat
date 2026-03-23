@@ -167,8 +167,8 @@ function ChatIndexContent() {
               placeholder="メッセージを入力... (Enter で送信、Shift+Enter で改行)"
             />
           </PromptInputBody>
-          <PromptInputFooter>
-            <PromptInputTools>
+          <PromptInputFooter className="items-end">
+            <PromptInputTools className="flex-1 min-w-0 flex-wrap">
               <Button
                 variant="ghost"
                 size="sm"
