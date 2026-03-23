@@ -269,6 +269,7 @@ function ChatPage() {
     decisions: ({ type: "approve" | "reject" } | null)[];
     pendingCount: number;
   } | null>(null);
+  const [isPendingApproval, setIsPendingApproval] = useState(false);
 
   const [volumePath, setVolumePath] = useState(
     () => localStorage.getItem(STORAGE_KEY_VOLUME) ?? ""
@@ -436,6 +437,7 @@ function ChatPage() {
   const handleSubmit = async (text: string, extraFilePaths?: string[]) => {
     if (!text.trim() && uploadedAttachments.length === 0 && !extraFilePaths?.length) return;
     if (isLoadingHistory) return;
+    if (pendingApprovalRef.current) return;
 
     // ストリーミング中は queue に追加して割り込みをリクエスト
     if (streaming) {
@@ -555,7 +557,7 @@ function ChatPage() {
               // SSEクローズ = Checkpoint保存完了（mark_done後にクローズされる）
               if (!streamCompleted) {
                 const queue = [...messageQueueRef.current];
-                if (queue.length > 0) {
+                if (queue.length > 0 && !pendingApprovalRef.current) {
                   // メッセージキュー割り込みによる終了 → 新ジョブを開始
                   setMessageQueue([]);
                   messageQueueRef.current = [];
@@ -950,6 +952,7 @@ function ChatPage() {
                         decisions: batchDecisions,
                         pendingCount,
                       };
+                      setIsPendingApproval(true);
                     }
                   } else if (resolvedType === "stream.timeout") {
                     // バックエンドが 100 秒制限でクローズ → outerLoop が即座に再接続する
@@ -1085,6 +1088,7 @@ function ChatPage() {
         { decisions: batch.decisions as { type: "approve" | "reject" }[] }
       ).catch(() => {});
       pendingApprovalRef.current = null;
+      setIsPendingApproval(false);
     }
   };
 
@@ -1196,6 +1200,7 @@ function ChatPage() {
         onAttachmentRemove={handleAttachmentRemove}
         onAttachmentUpdate={handleAttachmentUpdate}
         approvalMode={approvalMode}
+        isPendingApproval={isPendingApproval}
         onApprovalModeChange={handleApprovalModeChange}
         onApprovalDecide={handleApprovalDecide}
       />
@@ -1225,6 +1230,7 @@ type ChatContentProps = {
   onAttachmentRemove: (id: string) => void;
   onAttachmentUpdate: (id: string, updates: Partial<UploadedAttachment>) => void;
   approvalMode: ApprovalMode;
+  isPendingApproval: boolean;
   onApprovalModeChange: (mode: ApprovalMode) => void;
   onApprovalDecide: (batchId: string, batchIndex: number, decision: "approve" | "reject", alwaysApprove: boolean, toolName: string) => void;
 };
@@ -1249,6 +1255,7 @@ function ChatContent({
   onAttachmentRemove,
   onAttachmentUpdate,
   approvalMode,
+  isPendingApproval,
   onApprovalModeChange,
   onApprovalDecide,
 }: ChatContentProps) {
@@ -1370,10 +1377,12 @@ function ChatContent({
     <PromptInput onSubmit={handleFormSubmit}>
       <PromptInputBody>
         <PromptInputTextarea
-          placeholder={streaming
-            ? "メッセージをキューに追加... (Enter で送信)"
-            : "メッセージを入力... (Enter で送信、Shift+Enter で改行)"}
-          disabled={isLoadingHistory}
+          placeholder={isPendingApproval
+            ? "ツール承認の回答をお待ちください..."
+            : streaming
+              ? "メッセージをキューに追加... (Enter で送信)"
+              : "メッセージを入力... (Enter で送信、Shift+Enter で改行)"}
+          disabled={isLoadingHistory || isPendingApproval}
         />
       </PromptInputBody>
       <PromptInputFooter className="items-end">
