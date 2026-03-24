@@ -251,6 +251,7 @@ async def init_agent(
     extra_middleware: Optional[list] = None,
     job_id: Optional[str] = None,
     job_store=None,
+    plan_mode: bool = False,
 ):
 
     sp_ws_client = get_sp_workspace_client()
@@ -273,7 +274,10 @@ async def init_agent(
             },
         )
 
+    _PLAN_BLOCKED_TOOLS = {"write_file", "edit_file"}
     all_tools = mcp_tools + [web_search, web_fetch, get_current_time]
+    if plan_mode:
+        all_tools = [t for t in all_tools if t.name not in _PLAN_BLOCKED_TOOLS]
     allowed_tools = _load_hitl_config()
     from langchain.agents.middleware.human_in_the_loop import InterruptOnConfig  # noqa: PLC0415
 
@@ -298,9 +302,17 @@ async def init_agent(
         job_store=job_store,
     )
 
+    system_prompt = _load_system_prompt(_SYSTEM_PROMPT_PATH)
+    if plan_mode:
+        system_prompt += (
+            "\n\n# Plan Mode\n"
+            "You are in Plan Mode. Investigate the request thoroughly and create a detailed plan, "
+            "but do NOT write or edit any files. End your response with a clear, structured plan."
+        )
+
     return create_deep_agent(
         tools=all_tools,
-        system_prompt=_load_system_prompt(_SYSTEM_PROMPT_PATH),
+        system_prompt=system_prompt,
         memory=["AGENTS.md"],
         skills=["/preset/skills/", "skills/"],
         model=model,
@@ -375,13 +387,15 @@ async def stream_handler(
                 ws=user_workspace_client,
             )
             override_model = None if not USE_FAKE_MODEL else model
-            job_id = dict(request.custom_inputs or {}).get("job_id")
+            ci = dict(request.custom_inputs or {})
+            job_id = ci.get("job_id")
             job_store = get_injected_job_store()
             interrupt_mw = (
                 [InterruptMiddleware(job_id=str(job_id), job_store=job_store)]
                 if job_id and job_store
                 else []
             )
+            plan_mode = bool(ci.get("plan_mode", False))
             agent = await init_agent(
                 model=model,
                 workspace_client=user_workspace_client,
@@ -391,9 +405,9 @@ async def stream_handler(
                 extra_middleware=interrupt_mw,
                 job_id=str(job_id) if job_id else None,
                 job_store=job_store,
+                plan_mode=plan_mode,
             )
 
-            ci = dict(request.custom_inputs or {})
             resume_decisions = ci.get("resume_decisions")
 
             if resume_decisions:

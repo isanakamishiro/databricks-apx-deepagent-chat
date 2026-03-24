@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { SubAgentBlock, type SubAgentBlockData } from "@/components/chat/subagent-block";
 import { ToolApproval } from "@/components/chat/tool-approval";
-import { AlertCircle, Copy, Eye, MessageSquare, RefreshCw, Plus, Zap } from "lucide-react";
+import { AlertCircle, ClipboardList, Copy, Eye, MessageSquare, RefreshCw, Plus, Zap } from "lucide-react";
 import { chatApprove } from "@/lib/api";
 import { getApprovalMode, setApprovalMode, type ApprovalMode } from "@/lib/approval-mode";
 import { type UploadedAttachment } from "@/components/chat/attachment-panel";
@@ -34,6 +34,14 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
+import {
+  Plan,
+  PlanAction,
+  PlanContent,
+  PlanHeader,
+  PlanTitle,
+  PlanTrigger,
+} from "@/components/ai-elements/plan";
 import {
   Context,
   ContextTrigger,
@@ -288,6 +296,8 @@ function ChatPage() {
     pendingCount: number;
   } | null>(null);
   const [isPendingApproval, setIsPendingApproval] = useState(false);
+  const [planSummary, setPlanSummary] = useState<string | null>(null);
+  const planModeSessionRef = useRef(false);
 
   const [volumePath, setVolumePath] = useState(
     () => localStorage.getItem(STORAGE_KEY_VOLUME) ?? ""
@@ -457,6 +467,9 @@ function ChatPage() {
     if (isLoadingHistory) return;
     if (pendingApprovalRef.current) return;
 
+    setPlanSummary(null);
+    planModeSessionRef.current = approvalModeRef.current === "plan";
+
     // ストリーミング中は queue に追加して割り込みをリクエスト
     if (streaming) {
       const isFirstQueued = messageQueueRef.current.length === 0;
@@ -530,6 +543,7 @@ function ChatPage() {
             volume_path: volumePath,
             llm_model: selectedModel,
             thread_id: threadId,
+            plan_mode: approvalModeRef.current === "plan",
           },
         }),
       });
@@ -602,6 +616,7 @@ function ChatPage() {
                             volume_path: volumePath,
                             llm_model: selectedModel,
                             thread_id: threadId,
+                            plan_mode: approvalModeRef.current === "plan",
                           },
                         }),
                       });
@@ -925,6 +940,7 @@ function ChatPage() {
                     // 各リクエストの自動承認判定を先に計算
                     const autoApproveFlags = requests.map((req) =>
                       approvalModeRef.current === "auto" ||
+                      approvalModeRef.current === "plan" ||
                       alwaysApprovedToolsRef.current.has(req.tool_name)
                     );
 
@@ -1157,6 +1173,29 @@ function ChatPage() {
     setApprovalMode(mode);
   };
 
+  // ストリーミング終了時にプランモードセッションのプランを抽出
+  const prevStreamingForPlanRef = useRef(false);
+  useEffect(() => {
+    if (prevStreamingForPlanRef.current && !streaming && planModeSessionRef.current) {
+      const lastAssistantMsg = [...messagesRef.current].reverse().find(m => m.role === "assistant");
+      if (lastAssistantMsg && !lastAssistantMsg.isError) {
+        const text = (lastAssistantMsg.blocks ?? [])
+          .filter((b): b is TextBlock => b.type === "text")
+          .map(b => b.content)
+          .join("");
+        if (text) setPlanSummary(text);
+      }
+      planModeSessionRef.current = false;
+    }
+    prevStreamingForPlanRef.current = streaming;
+  }, [streaming]);
+
+  const handleExecutePlan = () => {
+    setPlanSummary(null);
+    handleApprovalModeChange("ask");
+    handleSubmit("上記のプランを実行してください。");
+  };
+
   // search.q による初期メッセージの自動送信
   useEffect(() => {
     if (!initialQuery || initialQueryFiredRef.current) return;
@@ -1262,6 +1301,8 @@ function ChatPage() {
         isPendingApproval={isPendingApproval}
         onApprovalModeChange={handleApprovalModeChange}
         onApprovalDecide={handleApprovalDecide}
+        planSummary={planSummary}
+        onExecutePlan={handleExecutePlan}
       />
     </PromptInputProvider>
   );
@@ -1292,6 +1333,8 @@ type ChatContentProps = {
   isPendingApproval: boolean;
   onApprovalModeChange: (mode: ApprovalMode) => void;
   onApprovalDecide: (batchId: string, batchIndex: number, decision: "approve" | "reject", alwaysApprove: boolean, toolName: string) => void;
+  planSummary: string | null;
+  onExecutePlan: () => void;
 };
 
 function ChatContent({
@@ -1317,6 +1360,8 @@ function ChatContent({
   isPendingApproval,
   onApprovalModeChange,
   onApprovalDecide,
+  planSummary,
+  onExecutePlan,
 }: ChatContentProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const waitMessageRef = useRef<string>(getRandomWaitMessage());
@@ -1506,11 +1551,27 @@ function ChatContent({
             size="sm"
             className="h-7 px-2 text-xs gap-1"
             type="button"
-            title={approvalMode === "auto" ? "自動承認モード (クリックで確認モードに切替)" : "確認モード (クリックで自動承認に切替)"}
-            onClick={() => onApprovalModeChange(approvalMode === "auto" ? "ask" : "auto")}
+            title={
+              approvalMode === "auto"
+                ? "自動承認モード (クリックでプランモードに切替)"
+                : approvalMode === "plan"
+                ? "プランモード (クリックで確認モードに切替)"
+                : "確認モード (クリックで自動承認に切替)"
+            }
+            onClick={() =>
+              onApprovalModeChange(
+                approvalMode === "ask" ? "auto" : approvalMode === "auto" ? "plan" : "ask"
+              )
+            }
           >
-            {approvalMode === "auto" ? <Zap className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-            {approvalMode === "auto" ? "Auto" : "Ask"}
+            {approvalMode === "auto" ? (
+              <Zap className="h-3.5 w-3.5" />
+            ) : approvalMode === "plan" ? (
+              <ClipboardList className="h-3.5 w-3.5" />
+            ) : (
+              <Eye className="h-3.5 w-3.5" />
+            )}
+            {approvalMode === "auto" ? "Auto" : approvalMode === "plan" ? "Plan" : "Ask"}
           </Button>
         </PromptInputTools>
         <PromptInputSubmit
@@ -1803,6 +1864,20 @@ function ChatContent({
               </Message>
             );
           })}
+          {planSummary && !streaming && (
+            <Plan isStreaming={false} defaultOpen>
+              <PlanHeader>
+                <PlanTitle>実行プラン</PlanTitle>
+                <PlanTrigger />
+                <PlanAction>
+                  <Button onClick={onExecutePlan} size="sm">実行</Button>
+                </PlanAction>
+              </PlanHeader>
+              <PlanContent>
+                <MessageResponse>{planSummary}</MessageResponse>
+              </PlanContent>
+            </Plan>
+          )}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>

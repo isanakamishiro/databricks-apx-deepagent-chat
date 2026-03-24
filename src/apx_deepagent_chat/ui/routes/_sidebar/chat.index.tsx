@@ -28,7 +28,7 @@ import {
 import { VolumeExplorer } from "@/components/chat/volume-explorer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, CheckIcon, Eye, Plus, Zap } from "lucide-react";
+import { AlertTriangle, CheckIcon, ClipboardList, Eye, Plus, Zap } from "lucide-react";
 import { setPendingFiles } from "@/lib/pending-files";
 import { getApprovalMode, setApprovalMode, type ApprovalMode } from "@/lib/approval-mode";
 
@@ -229,15 +229,28 @@ function ChatIndexContent() {
                 size="sm"
                 className="h-7 px-2 text-xs gap-1"
                 type="button"
-                title={approvalMode === "auto" ? "自動承認モード (クリックで確認モードに切替)" : "確認モード (クリックで自動承認に切替)"}
+                title={
+                  approvalMode === "auto"
+                    ? "自動承認モード (クリックでプランモードに切替)"
+                    : approvalMode === "plan"
+                    ? "プランモード (クリックで確認モードに切替)"
+                    : "確認モード (クリックで自動承認に切替)"
+                }
                 onClick={() => {
-                  const next: ApprovalMode = approvalMode === "auto" ? "ask" : "auto";
+                  const next: ApprovalMode =
+                    approvalMode === "ask" ? "auto" : approvalMode === "auto" ? "plan" : "ask";
                   setApprovalModeState(next);
                   setApprovalMode(next);
                 }}
               >
-                {approvalMode === "auto" ? <Zap className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                {approvalMode === "auto" ? "Auto" : "Ask"}
+                {approvalMode === "auto" ? (
+                  <Zap className="h-3.5 w-3.5" />
+                ) : approvalMode === "plan" ? (
+                  <ClipboardList className="h-3.5 w-3.5" />
+                ) : (
+                  <Eye className="h-3.5 w-3.5" />
+                )}
+                {approvalMode === "auto" ? "Auto" : approvalMode === "plan" ? "Plan" : "Ask"}
               </Button>
             </PromptInputTools>
             <PromptInputSubmit />

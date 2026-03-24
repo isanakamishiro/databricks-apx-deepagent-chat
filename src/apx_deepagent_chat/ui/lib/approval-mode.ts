@@ -1,4 +1,4 @@
-export type ApprovalMode = "auto" | "ask";
+export type ApprovalMode = "auto" | "ask" | "plan";
 
 const STORAGE_KEY = "apx_approval_mode";
 
