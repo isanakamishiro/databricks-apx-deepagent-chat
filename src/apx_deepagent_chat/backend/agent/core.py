@@ -30,7 +30,7 @@ from mlflow.types.responses_helpers import ResponseError
 
 from ..core._base import LifespanDependency
 from .clients import get_injected_job_store, get_sp_workspace_client, get_user_workspace_client
-from .lc_tools import get_current_time, web_fetch, web_search
+from .lc_tools import get_current_time, plan, web_fetch, web_search
 from .mcp_tools import get_mcp_tools
 from .middleware import InterruptMiddleware, flatten_system_message, strip_content_block_ids
 from .model_loader import (
@@ -275,7 +275,7 @@ async def init_agent(
         )
 
     _PLAN_BLOCKED_TOOLS = {"write_file", "edit_file"}
-    all_tools = mcp_tools + [web_search, web_fetch, get_current_time]
+    all_tools = mcp_tools + [web_search, web_fetch, get_current_time, plan]
     if plan_mode:
         all_tools = [t for t in all_tools if t.name not in _PLAN_BLOCKED_TOOLS]
     allowed_tools = _load_hitl_config()

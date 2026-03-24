@@ -10,3 +10,4 @@ allows:
   - read_file
   - glob
   - grep
+  - plan

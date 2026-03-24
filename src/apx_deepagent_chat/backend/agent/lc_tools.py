@@ -33,9 +33,11 @@ def web_search(
         return (
             "検索エラー: リクエストがタイムアウトしました。後でもう一度試してください。"
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Web search error")
-        return "検索エラー: 予期しないエラーが発生しました。後でもう一度試してください。"
+        return (
+            "検索エラー: 予期しないエラーが発生しました。後でもう一度試してください。"
+        )
 
     if not results:
         return "検索結果が見つかりませんでした。"
@@ -67,10 +69,12 @@ def web_fetch(url: str, max_length: int = 50000) -> str:
     except requests.Timeout:
         return f"取得エラー: URL '{url}' への接続がタイムアウトしました。"
     except requests.HTTPError:
-        return f"取得エラー: HTTPエラーが発生しました。URLが正しいか確認してください。"
-    except Exception as e:
+        return f"取得エラー: HTTPエラーが発生しました。URL '{url}' が正しいか確認してください。"
+    except Exception:
         logger.exception("Web fetch error for URL: %s", url)
-        return "取得エラー: 予期しないエラーが発生しました。後でもう一度試してください。"
+        return (
+            "取得エラー: 予期しないエラーが発生しました。後でもう一度試してください。"
+        )
 
     text = result.text_content
     if not text or not text.strip():
@@ -78,6 +82,16 @@ def web_fetch(url: str, max_length: int = 50000) -> str:
     if len(text) > max_length:
         text = text[:max_length] + "\n\n... (truncated)"
     return text
+
+
+@langchain_tool
+def plan(plan: str) -> None:
+    """実行プランを提示します。調査・計画が完了したら、このツールを使ってMarkdown形式でプランをユーザーに提示してください。
+
+    Args:
+        plan: 実行プランの内容（Markdown形式）。
+    """
+    return None
 
 
 @langchain_tool
