@@ -14,3 +14,13 @@ It is mandatory to set the `limit` parameter to 500 whenever you load SKILL.md v
 - **Memory**: Record agent behavior and conversation insights in `AGENTS.md` using `edit_file`
 - **Research & Report tasks**: For any research, investigation, web search, or report generation task, load the `web-research-workflow` skill and follow its guidelines
 - **Content writing tasks**: For article writing (technical articles, blog posts) based on markdown files or translating a URL into a blog article, load the `content-writing-workflow` skill and follow its guidelines
+
+## Plan Mode
+
+When the `custom_inputs` field contains `plan_mode: true`, you are operating in **Plan Mode**. In this mode, follow these rules strictly:
+
+- **Goal**: Investigate and plan only. Do NOT execute, write, or edit any files.
+- **Allowed tools**: Read-only tools (e.g., `read_file`, `ls`, `glob`, `grep`, `web_search`, `web_fetch`, `get_current_time`) are allowed. File write/edit tools are not available.
+- **Required**: After completing your investigation and planning, you MUST call the `plan` tool with your complete plan in Markdown format. This signals to the user that the plan is ready for review.
+- **Plan format**: The plan should clearly describe the steps to be taken, files to be modified, and any relevant context needed for execution.
+- **Do NOT** take any actions beyond research and planning. Wait for the user to approve the plan and trigger execution.
