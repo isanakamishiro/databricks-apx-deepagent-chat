@@ -297,7 +297,6 @@ function ChatPage() {
   } | null>(null);
   const [isPendingApproval, setIsPendingApproval] = useState(false);
   const [planSummary, setPlanSummary] = useState<string | null>(null);
-  const planModeSessionRef = useRef(false);
 
   const [volumePath, setVolumePath] = useState(
     () => localStorage.getItem(STORAGE_KEY_VOLUME) ?? ""
@@ -468,7 +467,6 @@ function ChatPage() {
     if (pendingApprovalRef.current) return;
 
     setPlanSummary(null);
-    planModeSessionRef.current = approvalModeRef.current === "plan";
 
     // ストリーミング中は queue に追加して割り込みをリクエスト
     if (streaming) {
@@ -755,7 +753,17 @@ function ChatPage() {
                     const item = data.item ?? {};
                     if (item.type === "function_call") {
                       const activeCallId = activeSubagentCallIdRef.current;
-                      if (item.name === "task") {
+                      if (item.name === "plan") {
+                        // plan ツール → planSummary を更新してPlanコンポーネントを表示
+                        try {
+                          const planArgs = JSON.parse(item.arguments ?? "{}");
+                          if (typeof planArgs.plan === "string" && planArgs.plan.trim()) {
+                            setPlanSummary(planArgs.plan);
+                          }
+                        } catch {
+                          // 引数パース失敗時は何もしない
+                        }
+                      } else if (item.name === "task") {
                         // task ツール → SubAgentBlock を作成（pending）
                         const newSubAgent: SubAgentBlockData = {
                           callId: item.call_id ?? item.id ?? "",
@@ -1172,23 +1180,6 @@ function ChatPage() {
     approvalModeRef.current = mode;
     setApprovalMode(mode);
   };
-
-  // ストリーミング終了時にプランモードセッションのプランを抽出
-  const prevStreamingForPlanRef = useRef(false);
-  useEffect(() => {
-    if (prevStreamingForPlanRef.current && !streaming && planModeSessionRef.current) {
-      const lastAssistantMsg = [...messagesRef.current].reverse().find(m => m.role === "assistant");
-      if (lastAssistantMsg && !lastAssistantMsg.isError) {
-        const text = (lastAssistantMsg.blocks ?? [])
-          .filter((b): b is TextBlock => b.type === "text")
-          .map(b => b.content)
-          .join("");
-        if (text) setPlanSummary(text);
-      }
-      planModeSessionRef.current = false;
-    }
-    prevStreamingForPlanRef.current = streaming;
-  }, [streaming]);
 
   const handleExecutePlan = () => {
     setPlanSummary(null);
