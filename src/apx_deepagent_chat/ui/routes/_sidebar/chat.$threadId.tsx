@@ -511,6 +511,9 @@ function ChatPage() {
       const pathLines = allPaths.map((p) => `  <path>${p}</path>`).join("\n");
       apiText = `${text}\n\n<files>\n${pathLines}\n</files>`;
     }
+    if (approvalModeRef.current === "plan") {
+      apiText = `${apiText}\n\n<plan>true</plan>`;
+    }
 
     setUploadedAttachments([]);
 

@@ -17,7 +17,7 @@ It is mandatory to set the `limit` parameter to 500 whenever you load SKILL.md v
 
 ## Plan Mode
 
-When the `custom_inputs` field contains `plan_mode: true`, you are operating in **Plan Mode**. In this mode, follow these rules strictly:
+When the user's message contains the tag `<plan>true</plan>`, you are operating in **Plan Mode**. In this mode, follow these rules strictly:
 
 - **Goal**: Investigate and plan only. Do NOT execute, write, or edit any files.
 - **Allowed tools**: Read-only tools (e.g., `read_file`, `ls`, `glob`, `grep`, `web_search`, `web_fetch`, `get_current_time`) are allowed. File write/edit tools are not available.
