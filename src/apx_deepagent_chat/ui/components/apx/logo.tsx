@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { Bot } from "lucide-react";
 
 interface LogoProps {
   to?: string;
@@ -10,11 +11,7 @@ interface LogoProps {
 export function Logo({ to = "/", className = "", showText = true, onClick }: LogoProps) {
   const content = (
     <div className={`flex items-center gap-2 ${className}`}>
-      <img
-        src="/logo.svg"
-        alt="logo"
-        className="h-6 w-6 text-primary border border-primary rounded-sm"
-      />
+      <Bot className="h-6 w-6 text-primary" />
       {showText && (
         <span className="font-semibold text-lg">{__APP_NAME__}</span>
       )}

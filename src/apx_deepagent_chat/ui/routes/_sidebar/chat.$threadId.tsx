@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { SubAgentBlock, type SubAgentBlockData } from "@/components/chat/subagent-block";
 import { ToolApproval } from "@/components/chat/tool-approval";
 import { AlertCircle, Copy, Eye, MessageSquare, RefreshCw, Plus, Zap } from "lucide-react";
@@ -87,7 +87,8 @@ type ToolCallState =
   | "input-streaming"
   | "input-available"
   | "output-available"
-  | "output-error";
+  | "output-error"
+  | "output-denied";
 
 type ToolCallBlock = {
   callId: string;
@@ -111,6 +112,7 @@ type ApprovalBlock = {
   toolArgs: Record<string, unknown>;
   state: "approval-requested" | "approval-responded";
   approved?: boolean;
+  correspondingToolCallId?: string;
 };
 
 type ChatBlock =
@@ -218,6 +220,22 @@ function getModelMaxTokens(model?: string): number {
   if (model.includes("gpt-4o")) return 128_000;
   if (model.includes("gpt-4")) return 128_000;
   return 200_000;
+}
+
+function waitForVisibleAndOnline(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!document.hidden && navigator.onLine) { resolve(); return; }
+    const cleanup = () => {
+      document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("online", check);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const check = () => { if (!document.hidden && navigator.onLine) { cleanup(); resolve(); } };
+    const onAbort = () => { cleanup(); reject(new DOMException("Aborted", "AbortError")); };
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("online", check);
+    signal.addEventListener("abort", onAbort);
+  });
 }
 
 const STORAGE_KEY_VOLUME = "apx_volume_path";
@@ -855,14 +873,14 @@ function ChatPage() {
                               );
                               updated[updated.length - 1] = { ...last, subAgentBlocks, blocks: newBlocks };
                             } else {
-                              // 通常ツールの結果
+                              // 通常ツールの結果（output-denied は上書きしない）
                               const toolCallBlocks = (last.toolCallBlocks ?? []).map((b) =>
-                                b.callId === callId
+                                b.callId === callId && b.state !== "output-denied"
                                   ? { ...b, result, state: "output-available" as const }
                                   : b
                               );
                               const newBlocks = (last.blocks ?? []).map((b) =>
-                                b.type === "tool" && b.callId === callId
+                                b.type === "tool" && b.callId === callId && b.state !== "output-denied"
                                   ? { ...b, result, state: "output-available" as const }
                                   : b
                               );
@@ -904,41 +922,59 @@ function ChatPage() {
                       Array(requests.length).fill(null);
                     let pendingCount = 0;
 
-                    for (let ri = 0; ri < requests.length; ri++) {
-                      const req = requests[ri];
-                      const isAutoApprove =
-                        approvalModeRef.current === "auto" ||
-                        alwaysApprovedToolsRef.current.has(req.tool_name);
+                    // 各リクエストの自動承認判定を先に計算
+                    const autoApproveFlags = requests.map((req) =>
+                      approvalModeRef.current === "auto" ||
+                      alwaysApprovedToolsRef.current.has(req.tool_name)
+                    );
 
-                      const blockBase: ApprovalBlock = {
-                        type: "approval" as const,
-                        batchId,
-                        batchIndex: ri,
-                        toolName: req.tool_name,
-                        toolArgs: req.tool_args,
-                        state: isAutoApprove ? ("approval-responded" as const) : ("approval-requested" as const),
-                        approved: isAutoApprove ? true : undefined,
-                      };
-
+                    autoApproveFlags.forEach((isAutoApprove, ri) => {
                       if (isAutoApprove) {
                         batchDecisions[ri] = { type: "approve" };
                       } else {
                         pendingCount++;
                       }
+                    });
 
-                      const block = blockBase;
-                      setMessages((prev) => {
-                        const updated = [...prev];
-                        const last = updated[updated.length - 1];
-                        if (last?.role === "assistant") {
-                          updated[updated.length - 1] = {
-                            ...last,
-                            blocks: [...(last.blocks ?? []), block],
-                          };
+                    // 単一の setMessages 呼び出しで全 approval ブロックを追加し、対応ツールブロックの callId をリンク
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      if (!last || last.role !== "assistant") return prev;
+
+                      const currentBlocks = [...(last.blocks ?? [])];
+                      const alreadyLinked = new Set<string>();
+
+                      for (let ri = 0; ri < requests.length; ri++) {
+                        const req = requests[ri];
+                        const isAutoApprove = autoApproveFlags[ri];
+
+                        // 対応するツールブロックを逆順で検索
+                        let correspondingToolCallId: string | undefined;
+                        for (let j = currentBlocks.length - 1; j >= 0; j--) {
+                          const b = currentBlocks[j];
+                          if (b.type === "tool" && b.name === req.tool_name && !alreadyLinked.has(b.callId)) {
+                            correspondingToolCallId = b.callId;
+                            alreadyLinked.add(b.callId);
+                            break;
+                          }
                         }
-                        return updated;
-                      });
-                    }
+
+                        currentBlocks.push({
+                          type: "approval" as const,
+                          batchId,
+                          batchIndex: ri,
+                          toolName: req.tool_name,
+                          toolArgs: req.tool_args,
+                          state: isAutoApprove ? ("approval-responded" as const) : ("approval-requested" as const),
+                          approved: isAutoApprove ? true : undefined,
+                          correspondingToolCallId,
+                        });
+                      }
+
+                      updated[updated.length - 1] = { ...last, blocks: currentBlocks };
+                      return updated;
+                    });
 
                     if (pendingCount === 0) {
                       chatApprove(
@@ -983,6 +1019,17 @@ function ChatPage() {
           if (e instanceof Error && e.name === "AbortError") {
             if (ctrl.signal.aborted) break outerLoop; // ユーザーが停止
             continue outerLoop; // 115秒再接続
+          }
+          // ネットワークエラー（モバイルバックグラウンド等）: 復帰を待って再接続
+          if (e instanceof TypeError || (e instanceof DOMException && e.name !== "AbortError")) {
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+              await waitForVisibleAndOnline(ctrl.signal);
+            } catch {
+              break outerLoop; // abort された
+            }
+            if (!ctrl.signal.aborted) continue outerLoop;
+            break outerLoop;
           }
           throw e;
         } finally {
@@ -1070,13 +1117,25 @@ function ChatPage() {
       const updated = [...prev];
       const last = updated[updated.length - 1];
       if (last?.role === "assistant") {
+        const blocks = last.blocks ?? [];
+        // 対応する approval ブロックを先に探して correspondingToolCallId を取得
+        const approvalBlock = blocks.find(
+          (b) => b.type === "approval" && b.batchId === batchId && b.batchIndex === batchIndex
+        ) as ApprovalBlock | undefined;
+        const linkedCallId = approvalBlock?.correspondingToolCallId;
+
         updated[updated.length - 1] = {
           ...last,
-          blocks: (last.blocks ?? []).map((b) =>
-            b.type === "approval" && b.batchId === batchId && b.batchIndex === batchIndex
-              ? { ...b, state: "approval-responded" as const, approved: decision === "approve" }
-              : b
-          ),
+          blocks: blocks.map((b) => {
+            if (b.type === "approval" && b.batchId === batchId && b.batchIndex === batchIndex) {
+              return { ...b, state: "approval-responded" as const, approved: decision === "approve" };
+            }
+            // 拒否の場合: 対応するツールブロックを output-denied に更新
+            if (decision === "reject" && b.type === "tool" && linkedCallId && b.callId === linkedCallId) {
+              return { ...b, state: "output-denied" as const };
+            }
+            return b;
+          }),
         };
       }
       return updated;
@@ -1503,71 +1562,101 @@ function ChatContent({
                 )}
                 {msg.blocks && msg.blocks.length > 0 ? (
                   <div className="space-y-2 w-full">
-                    {msg.blocks.map((block, bi) => {
-                      if (block.type === "text") {
+                    {(() => {
+                      const blocks = msg.blocks!;
+                      // 事前処理: approval ブロックに対応するツールブロックの callId を収集
+                      const toolCallIdsWithApproval = new Set<string>();
+                      const approvalToToolBlock = new Map<number, ChatBlock & { type: "tool" }>();
+                      blocks.forEach((block, bi) => {
+                        if (block.type === "approval" && block.correspondingToolCallId) {
+                          toolCallIdsWithApproval.add(block.correspondingToolCallId);
+                          const toolBlock = blocks.find(
+                            (b) => b.type === "tool" && b.callId === block.correspondingToolCallId
+                          ) as (ChatBlock & { type: "tool" }) | undefined;
+                          if (toolBlock) {
+                            approvalToToolBlock.set(bi, toolBlock);
+                          }
+                        }
+                      });
+
+                      const renderToolBlock = (block: ChatBlock & { type: "tool" }, key: string) => {
+                        let parsedArgs: Record<string, unknown> = {};
+                        try {
+                          parsedArgs = JSON.parse(block.arguments || "{}");
+                        } catch {
+                          parsedArgs = { raw: block.arguments };
+                        }
+                        const firstArgValue = Object.values(parsedArgs)[0];
+                        const toolSubtitle = firstArgValue !== undefined && !Array.isArray(firstArgValue)
+                          ? (() => { const s = typeof firstArgValue === "string" ? firstArgValue : JSON.stringify(firstArgValue); return s.length > 80 ? s.slice(0, 80) + "..." : s; })()
+                          : undefined;
                         return (
-                          <MessageContent key={`text-${bi}`}>
-                            <MessageResponse>{block.content}</MessageResponse>
-                          </MessageContent>
+                          <Tool key={key}>
+                            <ToolHeader
+                              title={block.name}
+                              subtitle={toolSubtitle}
+                              type="tool-call"
+                              state={block.state}
+                            />
+                            <ToolContent>
+                              <ToolInput input={parsedArgs} />
+                              {block.result !== undefined && (
+                                <ToolOutput
+                                  output={block.result}
+                                  errorText={
+                                    block.state === "output-error"
+                                      ? block.result
+                                      : undefined
+                                  }
+                                />
+                              )}
+                            </ToolContent>
+                          </Tool>
                         );
-                      }
-                      if (block.type === "subagent") {
-                        return (
-                          <SubAgentBlock
-                            key={`sa-${bi}`}
-                            block={block}
-                          />
-                        );
-                      }
-                      if (block.type === "approval") {
-                        return (
-                          <ToolApproval
-                            key={`ap-${bi}`}
-                            toolName={block.toolName}
-                            toolArgs={block.toolArgs}
-                            state={block.state}
-                            approved={block.approved}
-                            onApprove={() => onApprovalDecide(block.batchId, block.batchIndex, "approve", false, block.toolName)}
-                            onReject={() => onApprovalDecide(block.batchId, block.batchIndex, "reject", false, block.toolName)}
-                            onAlwaysApprove={() => onApprovalDecide(block.batchId, block.batchIndex, "approve", true, block.toolName)}
-                          />
-                        );
-                      }
-                      // type === "tool"
-                      let parsedArgs: Record<string, unknown> = {};
-                      try {
-                        parsedArgs = JSON.parse(block.arguments || "{}");
-                      } catch {
-                        parsedArgs = { raw: block.arguments };
-                      }
-                      const firstArgValue = Object.values(parsedArgs)[0];
-                      const toolSubtitle = firstArgValue !== undefined && !Array.isArray(firstArgValue)
-                        ? (() => { const s = typeof firstArgValue === "string" ? firstArgValue : JSON.stringify(firstArgValue); return s.length > 80 ? s.slice(0, 80) + "..." : s; })()
-                        : undefined;
-                      return (
-                        <Tool key={`t-${bi}`}>
-                          <ToolHeader
-                            title={block.name}
-                            subtitle={toolSubtitle}
-                            type="tool-call"
-                            state={block.state}
-                          />
-                          <ToolContent>
-                            <ToolInput input={parsedArgs} />
-                            {block.result !== undefined && (
-                              <ToolOutput
-                                output={block.result}
-                                errorText={
-                                  block.state === "output-error"
-                                    ? block.result
-                                    : undefined
-                                }
+                      };
+
+                      return blocks.map((block, bi) => {
+                        if (block.type === "text") {
+                          return (
+                            <MessageContent key={`text-${bi}`}>
+                              <MessageResponse>{block.content}</MessageResponse>
+                            </MessageContent>
+                          );
+                        }
+                        if (block.type === "subagent") {
+                          return (
+                            <SubAgentBlock
+                              key={`sa-${bi}`}
+                              block={block}
+                            />
+                          );
+                        }
+                        if (block.type === "approval") {
+                          const linkedToolBlock = approvalToToolBlock.get(bi);
+                          return (
+                            <Fragment key={`ap-${bi}`}>
+                              <ToolApproval
+                                toolName={block.toolName}
+                                toolArgs={block.toolArgs}
+                                state={block.state}
+                                approved={block.approved}
+                                onApprove={() => onApprovalDecide(block.batchId, block.batchIndex, "approve", false, block.toolName)}
+                                onReject={() => onApprovalDecide(block.batchId, block.batchIndex, "reject", false, block.toolName)}
+                                onAlwaysApprove={() => onApprovalDecide(block.batchId, block.batchIndex, "approve", true, block.toolName)}
                               />
-                            )}
-                          </ToolContent>
-                        </Tool>
-                      );
-                    })}
+                              {block.state === "approval-responded" && linkedToolBlock && (
+                                renderToolBlock(linkedToolBlock, `t-after-ap-${bi}`)
+                              )}
+                            </Fragment>
+                          );
+                        }
+                        // type === "tool": 対応する approval ブロックがある場合はスキップ（approval の後に表示）
+                        if (toolCallIdsWithApproval.has(block.callId)) {
+                          return null;
+                        }
+                        return renderToolBlock(block, `t-${bi}`);
+                      });
+                    })()}
                     {/* ストリーミング中: blocks があるが末尾が text でない場合にスケルトン表示 */}
                     {streaming && isLast && msg.role === "assistant" &&
                       msg.blocks[msg.blocks.length - 1]?.type !== "text" && (

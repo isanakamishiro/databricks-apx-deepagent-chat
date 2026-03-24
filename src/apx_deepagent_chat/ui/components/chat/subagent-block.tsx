@@ -15,7 +15,8 @@ export type ToolCallState =
   | "input-streaming"
   | "input-available"
   | "output-available"
-  | "output-error";
+  | "output-error"
+  | "output-denied";
 
 export type SubAgentToolCall = {
   callId: string;
@@ -63,6 +64,8 @@ function ToolCallStateIcon({ state }: { state: ToolCallState }) {
       return <CheckIcon className="size-3 shrink-0 text-green-500" />;
     case "output-error":
       return <XCircleIcon className="size-3 shrink-0 text-destructive" />;
+    case "output-denied":
+      return <XCircleIcon className="size-3 shrink-0 text-muted-foreground" />;
   }
 }
 

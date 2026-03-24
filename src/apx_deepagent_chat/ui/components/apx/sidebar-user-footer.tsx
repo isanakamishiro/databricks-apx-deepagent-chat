@@ -22,11 +22,11 @@ function SidebarUserFooterContent() {
   const { data: user } = useCurrentUserSuspense(selector());
 
   const firstLetters = useMemo(() => {
-    const userName = user.user_name ?? "";
-    const [first = "", ...rest] = userName.split(" ");
+    const name = user.display_name ?? user.user_name ?? "";
+    const [first = "", ...rest] = name.split(" ");
     const last = rest.at(-1) ?? "";
     return `${first[0] ?? ""}${last[0] ?? ""}`.toUpperCase();
-  }, [user.user_name]);
+  }, [user.display_name, user.user_name]);
 
   return (
     <SidebarMenuButton
