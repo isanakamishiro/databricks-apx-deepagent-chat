@@ -34,6 +34,7 @@ from typing import Any, List
 import mlflow
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import DatabricksError, NotFound, ResourceDoesNotExist
+from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     WRITES_IDX_MAP,
@@ -686,6 +687,8 @@ class UCBundleCheckpointer(InMemorySaver):
         self._bundle_path = (
             f"{volume_path.rstrip('/')}/.checkpoints/{thread_id}/bundle.json.gz"
         )
+        self._save_lock: asyncio.Lock = asyncio.Lock()
+        self._bg_save_task: asyncio.Task | None = None
 
     @property
     def _files(self):
@@ -701,9 +704,58 @@ class UCBundleCheckpointer(InMemorySaver):
         return self
 
     async def __aexit__(self, *exc_info: Any) -> None:
+        # バックグラウンド保存が進行中なら完了を待つ（最終保存と競合しないよう）
+        if self._bg_save_task is not None and not self._bg_save_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(self._bg_save_task), timeout=30.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                logger.warning("[bundle] background save did not finish before exit", exc_info=True)
+
         t0 = time.monotonic()
         await asyncio.to_thread(self._save_bundle)
         logger.info("[bundle] save took: %.3fs", time.monotonic() - t0)
+
+    # ------------------------------------------------------------------
+    # aput override: ツール呼び出し完了時にバックグラウンド保存をトリガー
+    # ------------------------------------------------------------------
+
+    async def aput(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
+        result = await super().aput(config, checkpoint, metadata, new_versions)
+        # 最後のメッセージがToolMessageのとき（ツール呼び出し完了直後）にバックグラウンド保存
+        messages = (checkpoint.get("channel_values") or {}).get("messages") or []
+        if messages and isinstance(messages[-1], ToolMessage):
+            self._bg_save_task = asyncio.create_task(
+                self._run_background_save(),
+                name=f"bg-bundle-save-{self._thread_id}",
+            )
+            self._bg_save_task.add_done_callback(self._on_bg_save_done)
+        return result
+
+    async def _run_background_save(self) -> None:
+        """バックグラウンド保存を試みる。保存中なら即スキップ。"""
+        if self._save_lock.locked():
+            logger.debug("[bundle] background save skipped (already in progress)")
+            return
+        async with self._save_lock:
+            t0 = time.monotonic()
+            try:
+                # スナップショットはイベントループスレッドで取得（GILによりデータ競合を防ぐ）
+                content = self._snapshot_bundle()
+                # アップロードはスレッドプールで非同期実行
+                await asyncio.to_thread(self._upload_bundle, content)
+                logger.info("[bundle] background save took: %.3fs", time.monotonic() - t0)
+            except Exception:
+                logger.warning("[bundle] background save failed (non-fatal)", exc_info=True)
+
+    def _on_bg_save_done(self, task: asyncio.Task) -> None:
+        if self._bg_save_task is task:
+            self._bg_save_task = None
 
     # ------------------------------------------------------------------
     # Bundle I/O
@@ -748,9 +800,12 @@ class UCBundleCheckpointer(InMemorySaver):
             blob_bytes: tuple[str, bytes] = (type_str, base64.b64decode(b64_data))
             self.blobs[(thread_id, ns, channel, version_str)] = blob_bytes
 
-    @mlflow.trace(span_type="UNKNOWN")
-    def _save_bundle(self) -> None:
-        """Serialize InMemorySaver storage and upload as bundle.json."""
+    def _snapshot_bundle(self) -> bytes:
+        """インメモリ状態をgzipバイト列にシリアライズする（イベントループスレッドから呼ぶこと）。
+
+        イベントループスレッドで同期実行することで、GILが辞書イテレーション中に
+        他スレッドからの書き込みをブロックし、データ競合を防ぐ。
+        """
         thread_id = self._thread_id
 
         storage_rows = []
@@ -811,14 +866,21 @@ class UCBundleCheckpointer(InMemorySaver):
             "writes": writes_rows,
             "blobs": blobs_rows,
         }
+        return gzip.compress(json.dumps(bundle).encode("utf-8"), compresslevel=6)
 
-        content = gzip.compress(json.dumps(bundle).encode("utf-8"), compresslevel=6)
+    def _upload_bundle(self, content: bytes) -> None:
+        """シリアライズ済みバイト列をUCにアップロードする（スレッドプールから呼んで可）。"""
         bundle_dir = str(PurePosixPath(self._bundle_path).parent)
         try:
             self._files.create_directory(bundle_dir)
         except Exception:
             pass
         self._files.upload(self._bundle_path, io.BytesIO(content), overwrite=True)
+
+    @mlflow.trace(span_type="UNKNOWN")
+    def _save_bundle(self) -> None:
+        """Serialize InMemorySaver storage and upload as bundle.json."""
+        self._upload_bundle(self._snapshot_bundle())
 
     # ------------------------------------------------------------------
     # Delete thread

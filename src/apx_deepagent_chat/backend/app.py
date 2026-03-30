@@ -4,7 +4,7 @@ import json
 import logging
 import signal
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
 from uuid import uuid4
 
 import mlflow
@@ -25,6 +25,7 @@ from .agent import (  # also registers @invoke / @stream handlers
     stream_handler,
 )
 from .agent.job_store import JobStore
+from .agent.uc_checkpointer import UCBundleCheckpointer
 from .core._base import LifespanDependency
 from .core._factory import _chain_dep_lifespans
 from .core._static import CachedStaticFiles, add_not_found_handler
@@ -197,6 +198,98 @@ async def _generate_sse(
 # ─── レスポンスモデル ─────────────────────────────────────────────────────────
 
 
+class ThreadStateResponse(BaseModel):
+    status: Literal["interrupted", "completed", "not_found"]
+    messages: list[dict]
+
+
+def _messages_to_frontend_format(lc_messages: list) -> list[dict]:
+    """LangChain メッセージを UI 表示用の ChatMessage 形式に変換する.
+
+    ツール呼び出し (tool_use)、ツール結果 (tool_result)、thinking ブロックを
+    フロントエンドの blocks / thinking フィールドに変換する。
+    """
+    import json as _json
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    # ToolMessage を tool_call_id でインデックス化（AIMessage の tool_use に対応させる）
+    tool_results: dict[str, str] = {}
+    for msg in lc_messages:
+        if isinstance(msg, ToolMessage):
+            call_id = getattr(msg, "tool_call_id", "") or ""
+            if call_id:
+                raw = msg.content
+                tool_results[call_id] = raw if isinstance(raw, str) else _json.dumps(raw)
+
+    result = []
+    for msg in lc_messages:
+        if isinstance(msg, HumanMessage):
+            content = msg.content if isinstance(msg.content, str) else ""
+            if content:
+                result.append({"role": "user", "content": content})
+
+        elif isinstance(msg, AIMessage):
+            thinking: str = ""
+            blocks: list[dict] = []
+            text_content: str = ""
+
+            if isinstance(msg.content, str):
+                text_content = msg.content
+                if text_content:
+                    blocks.append({"type": "text", "content": text_content})
+
+            elif isinstance(msg.content, list):
+                for block in msg.content:
+                    if not isinstance(block, dict):
+                        continue
+                    block_type = block.get("type", "")
+
+                    if block_type == "thinking":
+                        thinking = block.get("thinking", "")
+
+                    elif block_type == "text":
+                        text = block.get("text", "")
+                        if text:
+                            text_content += text
+                            blocks.append({"type": "text", "content": text})
+
+                    elif block_type == "tool_use":
+                        call_id = block.get("id", "")
+                        name = block.get("name", "")
+                        input_data = block.get("input", {})
+                        arguments = (
+                            _json.dumps(input_data)
+                            if isinstance(input_data, dict)
+                            else str(input_data)
+                        )
+                        result_str = tool_results.get(call_id)
+                        state = "output-available" if result_str is not None else "input-available"
+                        tool_block: dict = {
+                            "type": "tool",
+                            "callId": call_id,
+                            "name": name,
+                            "arguments": arguments,
+                            "state": state,
+                        }
+                        if result_str is not None:
+                            tool_block["result"] = result_str
+                        blocks.append(tool_block)
+
+            if blocks or thinking:
+                frontend_msg: dict = {
+                    "role": "assistant",
+                    "content": text_content,
+                    "blocks": blocks,
+                }
+                if thinking:
+                    frontend_msg["thinking"] = thinking
+                result.append(frontend_msg)
+
+        # ToolMessage は AIMessage ブロック内に吸収済みのためスキップ
+
+    return result
+
+
 class ChatStartResponse(BaseModel):
     job_id: str
 
@@ -329,6 +422,49 @@ def create_server_app() -> FastAPI:
             _generate_sse(job_id, last_event_id, request),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # ─── GET /api/chat/thread/{thread_id}/state ──────────────────────────────
+    @app.get(
+        "/api/chat/thread/{thread_id}/state",
+        operation_id="chatThreadState",
+        response_model=ThreadStateResponse,
+    )
+    async def chat_thread_state(
+        thread_id: str,
+        volume_path: Dependencies.VolumePath,
+        user_ws: Dependencies.UserClient,
+    ):
+        """チェックポイントからスレッドの最終状態を取得する."""
+        ckptr = UCBundleCheckpointer(
+            volume_path=volume_path,
+            thread_id=thread_id,
+            workspace_client=user_ws,
+        )
+        try:
+            await asyncio.to_thread(ckptr._load_bundle)
+        except Exception:
+            logger.exception("チェックポイント読み込み失敗: thread=%s", thread_id)
+            return ThreadStateResponse(status="not_found", messages=[])
+
+        config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+        tup = ckptr.get_tuple(config)  # type: ignore[arg-type]
+
+        if tup is None:
+            return ThreadStateResponse(status="not_found", messages=[])
+
+        # __interrupt__ channel への pending write が存在すれば中断済み
+        is_interrupted = bool(
+            tup.pending_writes
+            and any(channel == "__interrupt__" for _, channel, _ in tup.pending_writes)
+        )
+
+        raw_messages = tup.checkpoint.get("channel_values", {}).get("messages", [])
+        simplified = _messages_to_frontend_format(raw_messages)
+
+        return ThreadStateResponse(
+            status="interrupted" if is_interrupted else "completed",
+            messages=simplified,
         )
 
     # Serve frontend static files

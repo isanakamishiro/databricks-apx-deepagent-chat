@@ -2,6 +2,7 @@ import asyncio
 import functools
 import logging
 import time
+import traceback
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Optional
 
@@ -450,5 +451,9 @@ async def stream_handler(
         logger.exception("Streaming error: %s", e)
         yield ResponsesAgentStreamEvent(
             type="error",
-            message="An error occurred while processing your request. Please try again.",  # type: ignore
+            message=str(e) or "An error occurred while processing your request.",  # type: ignore
+            custom_outputs={
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc(),
+            },
         )

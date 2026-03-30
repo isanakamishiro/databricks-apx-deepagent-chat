@@ -69,6 +69,10 @@ export interface SaveMessagesRequest {
 export interface SchemaOut {
     name: string;
 }
+export interface ThreadStateResponse {
+    messages: Record<string, unknown>[];
+    status: "interrupted" | "completed" | "not_found";
+}
 export interface UploadAttachmentResponse {
     ok: boolean;
     path: string;
@@ -855,6 +859,95 @@ export function useChat_stream_api_chat_stream__job_id__getSuspense<TData = {
     return useSuspenseQuery({
         queryKey: chat_stream_api_chat_stream__job_id__getKey(options.params),
         queryFn: ()=>chat_stream_api_chat_stream__job_id__get(options.params),
+        ...options?.query
+    });
+}
+export interface ChatThreadStateParams {
+    thread_id: string;
+    "x-uc-volume-path"?: string | null;
+    "X-Forwarded-Host"?: string | null;
+    "X-Forwarded-Preferred-Username"?: string | null;
+    "X-Forwarded-User"?: string | null;
+    "X-Forwarded-Email"?: string | null;
+    "X-Request-Id"?: string | null;
+    "X-Forwarded-Access-Token"?: string | null;
+}
+export const chatThreadState = async (params: ChatThreadStateParams, options?: RequestInit): Promise<{
+    data: ThreadStateResponse;
+}> =>{
+    const res = await fetch(`/api/chat/thread/${params.thread_id}/state`, {
+        ...options,
+        method: "GET",
+        headers: {
+            ...(params?.["x-uc-volume-path"] != null && {
+                "x-uc-volume-path": params["x-uc-volume-path"]
+            }),
+            ...(params?.["X-Forwarded-Host"] != null && {
+                "X-Forwarded-Host": params["X-Forwarded-Host"]
+            }),
+            ...(params?.["X-Forwarded-Preferred-Username"] != null && {
+                "X-Forwarded-Preferred-Username": params["X-Forwarded-Preferred-Username"]
+            }),
+            ...(params?.["X-Forwarded-User"] != null && {
+                "X-Forwarded-User": params["X-Forwarded-User"]
+            }),
+            ...(params?.["X-Forwarded-Email"] != null && {
+                "X-Forwarded-Email": params["X-Forwarded-Email"]
+            }),
+            ...(params?.["X-Request-Id"] != null && {
+                "X-Request-Id": params["X-Request-Id"]
+            }),
+            ...(params?.["X-Forwarded-Access-Token"] != null && {
+                "X-Forwarded-Access-Token": params["X-Forwarded-Access-Token"]
+            }),
+            ...options?.headers
+        }
+    });
+    if (!res.ok) {
+        const body = await res.text();
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(body);
+        } catch  {
+            parsed = body;
+        }
+        throw new ApiError(res.status, res.statusText, parsed);
+    }
+    return {
+        data: await res.json()
+    };
+};
+export const chatThreadStateKey = (params?: ChatThreadStateParams)=>{
+    return [
+        "/api/chat/thread/{thread_id}/state",
+        params
+    ] as const;
+};
+export function useChatThreadState<TData = {
+    data: ThreadStateResponse;
+}>(options: {
+    params: ChatThreadStateParams;
+    query?: Omit<UseQueryOptions<{
+        data: ThreadStateResponse;
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useQuery({
+        queryKey: chatThreadStateKey(options.params),
+        queryFn: ()=>chatThreadState(options.params),
+        ...options?.query
+    });
+}
+export function useChatThreadStateSuspense<TData = {
+    data: ThreadStateResponse;
+}>(options: {
+    params: ChatThreadStateParams;
+    query?: Omit<UseSuspenseQueryOptions<{
+        data: ThreadStateResponse;
+    }, ApiError, TData>, "queryKey" | "queryFn">;
+}) {
+    return useSuspenseQuery({
+        queryKey: chatThreadStateKey(options.params),
+        queryFn: ()=>chatThreadState(options.params),
         ...options?.query
     });
 }

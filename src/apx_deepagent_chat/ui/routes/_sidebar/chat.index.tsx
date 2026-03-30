@@ -30,6 +30,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, CheckIcon, ClipboardList, Eye, Plus, Zap } from "lucide-react";
 import { setPendingFiles } from "@/lib/pending-files";
+import { setPendingChatJob } from "@/lib/pending-chat-job";
 import { getApprovalMode, setApprovalMode, type ApprovalMode } from "@/lib/approval-mode";
 
 export const Route = createFileRoute("/_sidebar/chat/")({
@@ -108,9 +109,41 @@ function ChatIndexContent() {
     });
   };
 
-  const goToChat = (text: string) => {
+  const goToChat = async (text: string) => {
     if (!text.trim()) return;
     const threadId = crypto.randomUUID();
+
+    // ルート遷移と並行してAPIコールを開始しレイテンシを短縮
+    try {
+      let apiText = text;
+      if (approvalMode === "plan") {
+        apiText = `${text}\n\n<plan>true</plan>`;
+      }
+      const startRes = await fetch("/api/chat/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(volumePath ? { "x-uc-volume-path": volumePath } : {}),
+        },
+        body: JSON.stringify({
+          input: [{ role: "user", content: apiText }],
+          stream: true,
+          custom_inputs: {
+            volume_path: volumePath,
+            llm_model: selectedModel,
+            thread_id: threadId,
+            plan_mode: approvalMode === "plan",
+          },
+        }),
+      });
+      if (startRes.ok) {
+        const { job_id } = await startRes.json() as { job_id: string };
+        setPendingChatJob({ threadId, jobId: job_id, userText: text });
+      }
+    } catch {
+      // 失敗時はチャット画面側で通常フロー（handleSubmit）にフォールバック
+    }
+
     navigate({
       to: "/chat/$threadId",
       params: { threadId },
@@ -119,7 +152,7 @@ function ChatIndexContent() {
   };
 
   const handleFormSubmit = ({ text }: { text: string; files: unknown[] }) => {
-    goToChat(text);
+    void goToChat(text);
   };
 
   const handleSuggestionClick = (suggestion: string) => {

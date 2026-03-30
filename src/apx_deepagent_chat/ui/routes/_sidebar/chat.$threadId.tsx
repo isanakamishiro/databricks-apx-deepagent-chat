@@ -2,13 +2,15 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { SubAgentBlock, type SubAgentBlockData } from "@/components/chat/subagent-block";
 import { ToolApproval } from "@/components/chat/tool-approval";
-import { AlertCircle, ClipboardList, Copy, Eye, MessageSquare, RefreshCw, Plus, Zap } from "lucide-react";
+import { AlertCircle, ChevronDown, ClipboardList, Copy, Eye, MessageSquare, RefreshCw, Plus, Zap } from "lucide-react";
 import { chatApprove } from "@/lib/api";
 import { getApprovalMode, setApprovalMode, type ApprovalMode } from "@/lib/approval-mode";
 import { type UploadedAttachment } from "@/components/chat/attachment-panel";
 import { nanoid } from "nanoid";
 import { takePendingFiles } from "@/lib/pending-files";
+import { takePendingChatJob } from "@/lib/pending-chat-job";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Message,
   MessageAction,
@@ -137,6 +139,11 @@ type ChatMessage = {
   toolCallBlocks?: ToolCallBlock[];   // 後方互換性のために残す
   subAgentBlocks?: SubAgentBlockData[]; // 後方互換性のために残す
   isError?: boolean;
+  isInterrupted?: boolean;
+  errorDetail?: {
+    error_type: string;
+    traceback: string;
+  };
   usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
   model?: string;
   maxInputTokens?: number;
@@ -299,6 +306,10 @@ function ChatPage() {
   } | null>(null);
   const [isPendingApproval, setIsPendingApproval] = useState(false);
   const [planSummary, setPlanSummary] = useState<string | null>(null);
+  const wasInterruptedByVisibilityRef = useRef(false);
+  const visibilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const VISIBILITY_INTERRUPT_MS = 5 * 60 * 1000; // 5分
 
   const [volumePath, setVolumePath] = useState(
     () => localStorage.getItem(STORAGE_KEY_VOLUME) ?? ""
@@ -357,31 +368,95 @@ function ChatPage() {
 
     if (!userId) return;
 
+    // initialQuery があれば新規スレッドなので履歴照会は不要
+    if (initialQuery) return;
+
     setIsLoadingHistory(true);
 
-    fetch(
-      `/api/chat-history/${threadId}/messages?user_id=${encodeURIComponent(userId)}`,
-      {
-        headers: volumePath ? { "x-uc-volume-path": volumePath } : {},
+    const loadHistory = async () => {
+      // 1. チェックポイント優先ロード
+      if (volumePath) {
+        try {
+          const res = await fetch(`/api/chat/thread/${threadId}/state`, {
+            headers: { "x-uc-volume-path": volumePath },
+          });
+          if (res.ok) {
+            const data = await res.json() as { status: string; messages: Array<{ role: string; content: string; thinking?: string; blocks?: ChatBlock[] }> };
+            if (data.status !== "not_found" && data.messages.length > 0) {
+              setMessages(data.messages.map((m) => ({
+                role: m.role as "user" | "assistant",
+                content: m.content,
+                ...(m.thinking !== undefined && { thinking: m.thinking }),
+                ...(m.blocks !== undefined && { blocks: m.blocks }),
+              })));
+              persistedCountRef.current = data.messages.length;
+              return;
+            }
+          }
+        } catch {
+          // チェックポイント読み込み失敗 → フォールバックへ
+        }
       }
-    )
-      .then((r) => {
+
+      // 2. フォールバック: chat-history API
+      try {
+        const r = await fetch(
+          `/api/chat-history/${threadId}/messages?user_id=${encodeURIComponent(userId)}`,
+          { headers: volumePath ? { "x-uc-volume-path": volumePath } : {} }
+        );
         if (!r.ok) return;
-        return r.json();
-      })
-      .then((data) => {
+        const data = await r.json();
         const msgs = Array.isArray(data) ? data : (data?.messages ?? []);
         if (msgs.length > 0) {
           setMessages(msgs as ChatMessage[]);
           persistedCountRef.current = msgs.length;
         }
-      })
-      .catch(() => {})
-      .finally(() => {
-        setIsLoadingHistory(false);
-      });
+      } catch {
+        // ignore
+      }
+    };
+
+    loadHistory().finally(() => setIsLoadingHistory(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
+
+  // ─── Visibility タイムアウト: 5分以上バックグラウンドになったら interrupt ───
+  useEffect(() => {
+    if (!streaming) {
+      if (visibilityTimerRef.current) {
+        clearTimeout(visibilityTimerRef.current);
+        visibilityTimerRef.current = null;
+      }
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        visibilityTimerRef.current = setTimeout(() => {
+          const jobId = currentJobIdRef.current;
+          if (jobId) {
+            fetch(`/api/chat/interrupt/${jobId}`, { method: "POST" }).catch(() => {});
+            wasInterruptedByVisibilityRef.current = true;
+          }
+        }, VISIBILITY_INTERRUPT_MS);
+      } else {
+        if (visibilityTimerRef.current) {
+          clearTimeout(visibilityTimerRef.current);
+          visibilityTimerRef.current = null;
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (visibilityTimerRef.current) {
+        clearTimeout(visibilityTimerRef.current);
+        visibilityTimerRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streaming]);
 
   // ストリーミング完了時にメッセージを永続化
   useEffect(() => {
@@ -437,6 +512,51 @@ function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleJobNotFound = async () => {
+    try {
+      if (!volumePath) throw new Error("no volume path");
+      const res = await fetch(`/api/chat/thread/${threadId}/state`, {
+        headers: { "x-uc-volume-path": volumePath },
+      });
+      if (!res.ok) throw new Error("state fetch failed");
+      const data = await res.json() as { status: string; messages: Array<{ role: string; content: string }> };
+
+      if (data.status === "not_found" || data.messages.length === 0) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant" as const, content: "接続が切れました。新しいメッセージを送信してください。", isError: true },
+        ]);
+        return;
+      }
+
+      // チェックポイントから会話を復元
+      const restored = data.messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
+      setMessages(restored);
+      persistedCountRef.current = restored.length;
+
+      if (data.status === "interrupted" || wasInterruptedByVisibilityRef.current) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant" as const,
+            content: "処理が中断されました。新しいメッセージを送信して処理を再開できます。",
+            isInterrupted: true,
+          },
+        ]);
+      }
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant" as const, content: "接続が切れました。新しいメッセージを送信してください。", isError: true },
+      ]);
+    } finally {
+      wasInterruptedByVisibilityRef.current = false;
+    }
+  };
+
   const handleStop = () => {
     if (messageQueue.length > 0) {
       const confirmed = window.confirm(
@@ -463,7 +583,7 @@ function ChatPage() {
     localStorage.setItem(STORAGE_KEY_MODEL, model);
   };
 
-  const handleSubmit = async (text: string, extraFilePaths?: string[]) => {
+  const handleSubmit = async (text: string, extraFilePaths?: string[], preStartedJobId?: string) => {
     if (!text.trim() && uploadedAttachments.length === 0 && !extraFilePaths?.length) return;
     if (isLoadingHistory) return;
     if (pendingApprovalRef.current) return;
@@ -533,32 +653,42 @@ function ChatPage() {
 
     try {
       // Step 1: エージェント処理をバックグラウンドで開始し、job_id を取得
-      const startRes = await fetch("/api/chat/start", {
-        method: "POST",
-        signal: ctrl.signal,
-        headers: {
-          "Content-Type": "application/json",
-          ...(volumePath ? { "x-uc-volume-path": volumePath } : {}),
-        },
-        body: JSON.stringify({
-          input: [{ role: "user", content: apiText }],
-          stream: true,
-          custom_inputs: {
-            volume_path: volumePath,
-            llm_model: selectedModel,
-            thread_id: threadId,
-            plan_mode: approvalModeRef.current === "plan",
+      // preStartedJobId が渡された場合はホーム画面で既に開始済みのジョブを再利用
+      let jobId: string;
+      if (preStartedJobId) {
+        jobId = preStartedJobId;
+        // currentJobIdRef は SSE 接続後に設定する（下記参照）。
+        // React StrictMode は useEffect のクリーンアップをマウント直後に同期的に実行するため、
+        // ここで同期的にセットすると cleanup が interrupt を送ってしまう。
+        // await 後に設定することで race を回避する。
+      } else {
+        const startRes = await fetch("/api/chat/start", {
+          method: "POST",
+          signal: ctrl.signal,
+          headers: {
+            "Content-Type": "application/json",
+            ...(volumePath ? { "x-uc-volume-path": volumePath } : {}),
           },
-        }),
-      });
+          body: JSON.stringify({
+            input: [{ role: "user", content: apiText }],
+            stream: true,
+            custom_inputs: {
+              volume_path: volumePath,
+              llm_model: selectedModel,
+              thread_id: threadId,
+              plan_mode: approvalModeRef.current === "plan",
+            },
+          }),
+        });
 
-      if (!startRes.ok) {
-        throw new Error(`Failed to start job: ${startRes.status}`);
+        if (!startRes.ok) {
+          throw new Error(`Failed to start job: ${startRes.status}`);
+        }
+
+        const { job_id: initialJobId } = await startRes.json() as { job_id: string };
+        jobId = initialJobId;
+        currentJobIdRef.current = jobId;
       }
-
-      const { job_id: initialJobId } = await startRes.json() as { job_id: string };
-      let jobId = initialJobId;
-      currentJobIdRef.current = jobId;
 
       // Step 2: SSE で結果を受け取る（115秒ごとに自動再接続）
       let lastEventId = -1;
@@ -577,6 +707,11 @@ function ChatPage() {
             signal: reconnectCtrl.signal,
             headers: lastEventId >= 0 ? { "Last-Event-ID": String(lastEventId) } : {},
           });
+
+          // preStartedJobId パスの場合、ここが最初の await 後のポイント。
+          // StrictMode cleanup は同期フェーズに発火するため、この時点でのセットは安全。
+          // else パスは既に上でセット済みだが、同値の再代入は無害。
+          currentJobIdRef.current = jobId;
 
           if (!response.ok || !response.body) {
             throw new Error(`Stream request failed: ${response.status}`);
@@ -1025,18 +1160,39 @@ function ChatPage() {
                     shouldBreakReader = true;
                   } else if (resolvedType === "error" && (data.error || data.message)) {
                     streamCompleted = true; // エラーもストリーム終了として扱う
-                    setMessages((prev) => {
-                      const updated = [...prev];
-                      const last = updated[updated.length - 1];
-                      if (last?.role === "assistant") {
-                        updated[updated.length - 1] = {
-                          ...last,
-                          content: `Error: ${data.error ?? data.message}`,
-                          isError: true,
-                        };
-                      }
-                      return updated;
-                    });
+                    const errorMsg = data.error ?? data.message;
+
+                    if (errorMsg === "Job not found") {
+                      // Job not found → チェックポイントから会話を復元
+                      // 空のアシスタントメッセージを削除してから復元
+                      setMessages((prev) => {
+                        const last = prev[prev.length - 1];
+                        return last?.role === "assistant" && !last.content && !last.blocks?.length
+                          ? prev.slice(0, -1)
+                          : prev;
+                      });
+                      await handleJobNotFound();
+                    } else {
+                      const errorDetail = data.custom_outputs
+                        ? {
+                            error_type: data.custom_outputs.error_type as string,
+                            traceback: data.custom_outputs.traceback as string,
+                          }
+                        : undefined;
+                      setMessages((prev) => {
+                        const updated = [...prev];
+                        const last = updated[updated.length - 1];
+                        if (last?.role === "assistant") {
+                          updated[updated.length - 1] = {
+                            ...last,
+                            content: `${errorDetail?.error_type ?? "Error"}: ${errorMsg}`,
+                            isError: true,
+                            errorDetail,
+                          };
+                        }
+                        return updated;
+                      });
+                    }
                   }
                 } catch {
                   // ignore parse errors
@@ -1108,6 +1264,18 @@ function ChatPage() {
         });
       }
     } finally {
+      // visibility中断フラグが残っている場合、中断バナーを追加
+      if (wasInterruptedByVisibilityRef.current) {
+        wasInterruptedByVisibilityRef.current = false;
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant" as const,
+            content: "処理が中断されました。新しいメッセージを送信して処理を再開できます。",
+            isInterrupted: true,
+          },
+        ]);
+      }
       setStreaming(false);
       setStopping(false);
       abortControllerRef.current = null;
@@ -1205,7 +1373,13 @@ function ChatPage() {
       replace: true,
     });
     const filePaths = initialFiles ? initialFiles.split(",").filter(Boolean) : [];
-    handleSubmit(initialQuery, filePaths);
+    // ホーム画面でナビゲーション前に開始済みのジョブがあれば再利用（レイテンシ短縮）
+    const pendingJob = takePendingChatJob();
+    if (pendingJob && pendingJob.threadId === threadId) {
+      handleSubmit(pendingJob.userText, filePaths, pendingJob.jobId);
+    } else {
+      handleSubmit(initialQuery, filePaths);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialQuery]);
 
@@ -1619,7 +1793,16 @@ function ChatContent({
                     <ReasoningContent>{msg.thinking}</ReasoningContent>
                   </Reasoning>
                 )}
-                {msg.blocks && msg.blocks.length > 0 ? (
+                {msg.isInterrupted ? (
+                  <MessageContent>
+                    <Alert variant="default" className="my-2 border-yellow-400 bg-yellow-50 dark:bg-yellow-950 dark:border-yellow-600">
+                      <AlertCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                      <AlertDescription className="text-yellow-800 dark:text-yellow-200">
+                        {msg.content}
+                      </AlertDescription>
+                    </Alert>
+                  </MessageContent>
+                ) : msg.blocks && msg.blocks.length > 0 ? (
                   <div className="space-y-2 w-full">
                     {(() => {
                       const blocks = msg.blocks!;
@@ -1738,7 +1921,24 @@ function ChatContent({
                       <MessageContent>
                         <Alert variant="destructive" className="w-full">
                           <AlertCircle className="h-4 w-4" />
-                          <AlertDescription>{msg.content}</AlertDescription>
+                          <AlertDescription>
+                            <div className="flex flex-col gap-2">
+                              <span>{msg.content}</span>
+                              {msg.errorDetail?.traceback && (
+                                <Collapsible>
+                                  <CollapsibleTrigger className="flex items-center gap-1 text-xs underline opacity-70 hover:opacity-100">
+                                    <ChevronDown className="h-3 w-3" />
+                                    トレースバックを表示
+                                  </CollapsibleTrigger>
+                                  <CollapsibleContent>
+                                    <pre className="mt-2 overflow-auto rounded bg-destructive/20 p-2 text-xs whitespace-pre-wrap break-all">
+                                      {msg.errorDetail.traceback}
+                                    </pre>
+                                  </CollapsibleContent>
+                                </Collapsible>
+                              )}
+                            </div>
+                          </AlertDescription>
                         </Alert>
                       </MessageContent>
                     )}
@@ -1795,7 +1995,24 @@ function ChatContent({
                       {msg.isError ? (
                         <Alert variant="destructive" className="w-full">
                           <AlertCircle className="h-4 w-4" />
-                          <AlertDescription>{msg.content}</AlertDescription>
+                          <AlertDescription>
+                            <div className="flex flex-col gap-2">
+                              <span>{msg.content}</span>
+                              {msg.errorDetail?.traceback && (
+                                <Collapsible>
+                                  <CollapsibleTrigger className="flex items-center gap-1 text-xs underline opacity-70 hover:opacity-100">
+                                    <ChevronDown className="h-3 w-3" />
+                                    トレースバックを表示
+                                  </CollapsibleTrigger>
+                                  <CollapsibleContent>
+                                    <pre className="mt-2 overflow-auto rounded bg-destructive/20 p-2 text-xs whitespace-pre-wrap break-all">
+                                      {msg.errorDetail.traceback}
+                                    </pre>
+                                  </CollapsibleContent>
+                                </Collapsible>
+                              )}
+                            </div>
+                          </AlertDescription>
                         </Alert>
                       ) : msg.role === "assistant" && !msg.content && streaming && isLast ? (
                         <div className="py-1">
