@@ -283,6 +283,8 @@ function ChatPage() {
   messageQueueRef.current = messageQueue;
   const currentJobIdRef = useRef<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  const stoppingRef = useRef(false);
+  stoppingRef.current = stopping;
   const [approvalMode, setApprovalModeState] = useState<ApprovalMode>(getApprovalMode);
   const approvalModeRef = useRef<ApprovalMode>(approvalMode);
   approvalModeRef.current = approvalMode;
@@ -465,6 +467,7 @@ function ChatPage() {
     if (!text.trim() && uploadedAttachments.length === 0 && !extraFilePaths?.length) return;
     if (isLoadingHistory) return;
     if (pendingApprovalRef.current) return;
+    if (stoppingRef.current) return;
 
     setPlanSummary(null);
 
@@ -1570,7 +1573,8 @@ function ChatContent({
         </PromptInputTools>
         <PromptInputSubmit
           status={stopping ? "submitted" : streaming ? "streaming" : undefined}
-          onClick={streaming && !stopping ? onStop : undefined}
+          onClick={streaming && !stopping ? (e) => { e.preventDefault(); onStop(); } : undefined}
+          disabled={stopping}
         />
       </PromptInputFooter>
     </PromptInput>
