@@ -697,6 +697,7 @@ class UCBundleCheckpointer(InMemorySaver):
     # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
+    @mlflow.trace(span_type="UNKNOWN")
     async def __aenter__(self) -> "UCBundleCheckpointer":
         t0 = time.monotonic()
         await asyncio.to_thread(self._load_bundle)
@@ -709,7 +710,9 @@ class UCBundleCheckpointer(InMemorySaver):
             try:
                 await asyncio.wait_for(asyncio.shield(self._bg_save_task), timeout=30.0)
             except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                logger.warning("[bundle] background save did not finish before exit", exc_info=True)
+                logger.warning(
+                    "[bundle] background save did not finish before exit", exc_info=True
+                )
 
         t0 = time.monotonic()
         await asyncio.to_thread(self._save_bundle)
@@ -749,9 +752,13 @@ class UCBundleCheckpointer(InMemorySaver):
                 content = self._snapshot_bundle()
                 # アップロードはスレッドプールで非同期実行
                 await asyncio.to_thread(self._upload_bundle, content)
-                logger.info("[bundle] background save took: %.3fs", time.monotonic() - t0)
+                logger.info(
+                    "[bundle] background save took: %.3fs", time.monotonic() - t0
+                )
             except Exception:
-                logger.warning("[bundle] background save failed (non-fatal)", exc_info=True)
+                logger.warning(
+                    "[bundle] background save failed (non-fatal)", exc_info=True
+                )
 
     def _on_bg_save_done(self, task: asyncio.Task) -> None:
         if self._bg_save_task is task:
@@ -761,7 +768,9 @@ class UCBundleCheckpointer(InMemorySaver):
     # Bundle I/O
     # ------------------------------------------------------------------
 
-    @mlflow.trace(span_type="UNKNOWN")
+    def load_bundle(self) -> None:
+        return self._load_bundle()
+
     def _load_bundle(self) -> None:
         """Download bundle.json.gz and populate InMemorySaver storage."""
         try:

@@ -519,7 +519,7 @@ function ChatPage() {
         headers: { "x-uc-volume-path": volumePath },
       });
       if (!res.ok) throw new Error("state fetch failed");
-      const data = await res.json() as { status: string; messages: Array<{ role: string; content: string }> };
+      const data = await res.json() as { status: string; messages: Array<{ role: string; content: string; thinking?: string; blocks?: ChatBlock[] }> };
 
       if (data.status === "not_found" || data.messages.length === 0) {
         setMessages((prev) => [
@@ -533,6 +533,8 @@ function ChatPage() {
       const restored = data.messages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
+        ...(m.thinking !== undefined && { thinking: m.thinking }),
+        ...(m.blocks !== undefined && { blocks: m.blocks }),
       }));
       setMessages(restored);
       persistedCountRef.current = restored.length;

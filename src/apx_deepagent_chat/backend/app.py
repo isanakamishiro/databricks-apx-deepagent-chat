@@ -88,7 +88,9 @@ async def _run_agent_background(job_id: str, body: dict) -> None:
                         event_type = str(event.type) if hasattr(event, "type") else ""
                         if event_type == "__tool_approval_interrupt__":
                             # HITL 割り込み: tool.approval_required をフロントへ配信
-                            hitl_requests = (event.custom_outputs or {}).get("requests", [])
+                            hitl_requests = (event.custom_outputs or {}).get(
+                                "requests", []
+                            )
                             break
                         data = event.model_dump(mode="json")
                         last_data = data
@@ -208,9 +210,15 @@ def _messages_to_frontend_format(lc_messages: list) -> list[dict]:
 
     ツール呼び出し (tool_use)、ツール結果 (tool_result)、thinking ブロックを
     フロントエンドの blocks / thinking フィールドに変換する。
+
+    連続する AIMessage（HumanMessage 間）はストリーミング時の挙動に合わせて
+    1つの assistant メッセージにマージする。
     """
     import json as _json
+
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    logger.debug(" --- Checkpoint ---")
 
     # ToolMessage を tool_call_id でインデックス化（AIMessage の tool_use に対応させる）
     tool_results: dict[str, str] = {}
@@ -219,74 +227,92 @@ def _messages_to_frontend_format(lc_messages: list) -> list[dict]:
             call_id = getattr(msg, "tool_call_id", "") or ""
             if call_id:
                 raw = msg.content
-                tool_results[call_id] = raw if isinstance(raw, str) else _json.dumps(raw)
+                tool_results[call_id] = (
+                    raw if isinstance(raw, str) else _json.dumps(raw)
+                )
 
-    result = []
+    logger.debug(f"tool_results: {tool_results}")
+
+    result: list[dict] = []
+
+    # 連続 AIMessage をまとめるアキュムレータ
+    asst_thinking: str = ""
+    asst_blocks: list[dict] = []
+    asst_text: str = ""
+
+    def flush_assistant() -> None:
+        nonlocal asst_thinking, asst_blocks, asst_text
+        if asst_blocks or asst_thinking:
+            msg_out: dict = {
+                "role": "assistant",
+                "content": asst_text,
+                "blocks": asst_blocks,
+            }
+            if asst_thinking:
+                msg_out["thinking"] = asst_thinking
+            result.append(msg_out)
+        asst_thinking = ""
+        asst_text = ""
+        asst_blocks = []
+
     for msg in lc_messages:
         if isinstance(msg, HumanMessage):
+            flush_assistant()
             content = msg.content if isinstance(msg.content, str) else ""
             if content:
                 result.append({"role": "user", "content": content})
 
         elif isinstance(msg, AIMessage):
-            thinking: str = ""
-            blocks: list[dict] = []
-            text_content: str = ""
+            # content_blocks を使う: Anthropic 固有形式を標準形式に変換済み
+            # - "reasoning" type + "reasoning" フィールド (≒ thinking)
+            # - "tool_call" type + "args" dict + "id" フィールド (≒ tool_use)
+            # - "text" type + "text" フィールド
 
-            if isinstance(msg.content, str):
-                text_content = msg.content
-                if text_content:
-                    blocks.append({"type": "text", "content": text_content})
+            logger.debug(msg.content_blocks)
 
-            elif isinstance(msg.content, list):
-                for block in msg.content:
-                    if not isinstance(block, dict):
-                        continue
-                    block_type = block.get("type", "")
+            for block in msg.content_blocks:
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type", "")
 
-                    if block_type == "thinking":
-                        thinking = block.get("thinking", "")
+                if block_type == "reasoning":
+                    thinking_text = block.get("reasoning", "")
+                    if thinking_text:
+                        asst_thinking += thinking_text
 
-                    elif block_type == "text":
-                        text = block.get("text", "")
-                        if text:
-                            text_content += text
-                            blocks.append({"type": "text", "content": text})
+                elif block_type == "text":
+                    text = block.get("text", "")
+                    if text:
+                        asst_text += text
+                        asst_blocks.append({"type": "text", "content": text})
 
-                    elif block_type == "tool_use":
-                        call_id = block.get("id", "")
-                        name = block.get("name", "")
-                        input_data = block.get("input", {})
-                        arguments = (
-                            _json.dumps(input_data)
-                            if isinstance(input_data, dict)
-                            else str(input_data)
-                        )
-                        result_str = tool_results.get(call_id)
-                        state = "output-available" if result_str is not None else "input-available"
-                        tool_block: dict = {
-                            "type": "tool",
-                            "callId": call_id,
-                            "name": name,
-                            "arguments": arguments,
-                            "state": state,
-                        }
-                        if result_str is not None:
-                            tool_block["result"] = result_str
-                        blocks.append(tool_block)
-
-            if blocks or thinking:
-                frontend_msg: dict = {
-                    "role": "assistant",
-                    "content": text_content,
-                    "blocks": blocks,
-                }
-                if thinking:
-                    frontend_msg["thinking"] = thinking
-                result.append(frontend_msg)
+                elif block_type == "tool_call":
+                    call_id = block.get("id", "")
+                    name = block.get("name", "")
+                    args = block.get("args", {})
+                    arguments = (
+                        _json.dumps(args) if isinstance(args, dict) else str(args)
+                    )
+                    result_str = tool_results.get(call_id)
+                    state = (
+                        "output-available"
+                        if result_str is not None
+                        else "input-available"
+                    )
+                    tool_block: dict = {
+                        "type": "tool",
+                        "callId": call_id,
+                        "name": name,
+                        "arguments": arguments,
+                        "state": state,
+                    }
+                    if result_str is not None:
+                        tool_block["result"] = result_str
+                    asst_blocks.append(tool_block)
 
         # ToolMessage は AIMessage ブロック内に吸収済みのためスキップ
 
+    flush_assistant()
     return result
 
 
@@ -299,7 +325,6 @@ class ChatInterruptResponse(BaseModel):
 
 
 from .models import ChatApproveRequest, ChatApproveResponse  # noqa: E402
-
 
 # ─── アプリケーション生成 ─────────────────────────────────────────────────────
 
@@ -442,7 +467,7 @@ def create_server_app() -> FastAPI:
             workspace_client=user_ws,
         )
         try:
-            await asyncio.to_thread(ckptr._load_bundle)
+            await asyncio.to_thread(ckptr.load_bundle)
         except Exception:
             logger.exception("チェックポイント読み込み失敗: thread=%s", thread_id)
             return ThreadStateResponse(status="not_found", messages=[])
