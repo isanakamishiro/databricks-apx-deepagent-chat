@@ -218,7 +218,7 @@ def _messages_to_frontend_format(lc_messages: list) -> list[dict]:
 
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-    logger.debug(" --- Checkpoint ---")
+    logger.debug(" ---- Checkpoint ---")
 
     # ToolMessage を tool_call_id でインデックス化（AIMessage の tool_use に対応させる）
     tool_results: dict[str, str] = {}
@@ -231,7 +231,7 @@ def _messages_to_frontend_format(lc_messages: list) -> list[dict]:
                     raw if isinstance(raw, str) else _json.dumps(raw)
                 )
 
-    logger.debug(f"tool_results: {tool_results}")
+    logger.debug(f" tool_results: {tool_results}")
 
     result: list[dict] = []
 
@@ -267,8 +267,6 @@ def _messages_to_frontend_format(lc_messages: list) -> list[dict]:
             # - "reasoning" type + "reasoning" フィールド (≒ thinking)
             # - "tool_call" type + "args" dict + "id" フィールド (≒ tool_use)
             # - "text" type + "text" フィールド
-
-            logger.debug(msg.content_blocks)
 
             for block in msg.content_blocks:
                 if not isinstance(block, dict):
@@ -313,6 +311,9 @@ def _messages_to_frontend_format(lc_messages: list) -> list[dict]:
         # ToolMessage は AIMessage ブロック内に吸収済みのためスキップ
 
     flush_assistant()
+
+    logger.debug(result)
+
     return result
 
 

@@ -30,6 +30,17 @@ def _translate_openai_with_reasoning(message) -> list:
         for block in content:
             if isinstance(block, dict):
                 blocks.append(_strip_index(block))
+    # tool_calls を tool_call ブロックとして追加
+    # チェックポイント復元時に _messages_to_frontend_format が content_blocks から
+    # tool_call ブロックを探すために必要。ストリーミング中に呼ばれても
+    # _process_main_agent_messages は tool_call ブロックを無視するため副作用なし。
+    for tc in message.tool_calls or []:
+        blocks.append({
+            "type": "tool_call",
+            "id": tc.get("id", ""),
+            "name": tc.get("name", ""),
+            "args": tc.get("args", {}),
+        })
     return blocks
 
 
@@ -185,40 +196,56 @@ class ChatOpenAIWithReasoning(BaseChatOpenAI):
     def _convert_chunk_to_generation_chunk(
         self, chunk, default_chunk_class, base_generation_info
     ):
-        """ストリーミング: reasoningテキストをadditional_kwargs["reasoning"]に格納."""
+        """ストリーミング: reasoningテキストをadditional_kwargs["reasoning"]に格納.
+
+        model_provider は reasoning の有無に関わらず全チャンクで "openai_with_reasoning"
+        に固定する。LangChain の merge_dicts は同一値をスキップするため、全チャンクが
+        同じ値を持てば連結が発生しない（異なる値だと連結されてしまう）。
+        """
         gen_chunk = super()._convert_chunk_to_generation_chunk(
             chunk, default_chunk_class, base_generation_info
         )
         if gen_chunk is None:
             return gen_chunk
 
-        choices = chunk.get("choices") or []
-        if not choices:
-            return gen_chunk
-
-        delta = choices[0].get("delta") or {}
-        reasoning_text = self._extract_reasoning_text(delta)
-
-        # reasoning が無ければ変換不要（content は str のまま）
-        if not reasoning_text:
-            return gen_chunk
-
-        # reasoning を additional_kwargs に蓄積（merge_dicts が文字列結合する）
-        new_additional_kwargs = {
-            **gen_chunk.message.additional_kwargs,
-            "reasoning": reasoning_text,
-        }
+        # 全チャンクに model_provider = "openai_with_reasoning" を固定設定
         new_msg = gen_chunk.message.model_copy(
             update={
-                "additional_kwargs": new_additional_kwargs,
                 "response_metadata": {
                     **gen_chunk.message.response_metadata,
                     "model_provider": "openai_with_reasoning",
                 },
             }
         )
+
+        choices = chunk.get("choices") or []
+        if not choices:
+            return ChatGenerationChunk(
+                message=new_msg,
+                generation_info=gen_chunk.generation_info,
+            )
+
+        delta = choices[0].get("delta") or {}
+        reasoning_text = self._extract_reasoning_text(delta)
+
+        # reasoning が無ければ model_provider 固定のみ
+        if not reasoning_text:
+            return ChatGenerationChunk(
+                message=new_msg,
+                generation_info=gen_chunk.generation_info,
+            )
+
+        # reasoning を additional_kwargs に蓄積（merge_dicts が文字列結合する）
+        final_msg = new_msg.model_copy(
+            update={
+                "additional_kwargs": {
+                    **new_msg.additional_kwargs,
+                    "reasoning": reasoning_text,
+                },
+            }
+        )
         return ChatGenerationChunk(
-            message=new_msg,
+            message=final_msg,
             generation_info=gen_chunk.generation_info,
         )
 
