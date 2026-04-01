@@ -959,6 +959,8 @@ function ChatPage() {
                           return updated;
                         });
                       } else {
+                        // "agent"ツールは表示不要（Claude Code内部ツール）
+                        if (item.name === "agent") return;
                         // 通常のツール呼び出し
                         const newBlock: ToolCallBlock = {
                           callId: item.call_id ?? item.id ?? "",

@@ -120,7 +120,7 @@ export function SubAgentBlock({ block }: SubAgentBlockProps) {
       </TaskTrigger>
 
       <TaskContent>
-        {block.toolCalls.map((tc, i) => {
+        {block.toolCalls.filter(tc => tc.name !== "agent").map((tc, i) => {
           let firstParam: string | undefined;
           try {
             const args = JSON.parse(tc.arguments || "{}");
