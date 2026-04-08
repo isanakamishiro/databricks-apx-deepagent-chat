@@ -7,3 +7,7 @@ env:
     value: "databricks-uc"
   - name: MLFLOW_EXPERIMENT_ID
     valueFrom: "experiment"
+  - name: APX_DEEPAGENT_CHAT_JOB_STORE_BACKEND
+    value: "sqlite"
+  - name: APX_DEEPAGENT_CHAT_JOB_STORE_DB_PATH
+    value: "/tmp/apx_jobs.db"
