@@ -42,6 +42,7 @@ def test_append_event():
     event_id = store.append_event("job-1", "message", {"text": "hello"})
     assert event_id == 0
     job = store.get_job("job-1")
+    assert job is not None
     assert len(job.events) == 1
     assert job.events[0].event_type == "message"
 
@@ -50,7 +51,9 @@ def test_mark_done():
     store = InMemoryJobStore()
     store.create_job("job-1")
     store.mark_done("job-1")
-    assert store.get_job("job-1").status == "done"
+    job = store.get_job("job-1")
+    assert job is not None
+    assert job.status == "done"
 
 
 def test_mark_error():
@@ -58,6 +61,7 @@ def test_mark_error():
     store.create_job("job-1")
     store.mark_error("job-1", "something went wrong")
     job = store.get_job("job-1")
+    assert job is not None
     assert job.status == "error"
     assert job.error == "something went wrong"
 
@@ -93,7 +97,9 @@ def test_register_task_associates_task_with_job():
     try:
         task = loop.create_task(dummy())
         store.register_task("job-1", task)
-        assert store.get_job("job-1").task is task
+        job = store.get_job("job-1")
+        assert job is not None
+        assert job.task is task
     finally:
         loop.close()
 

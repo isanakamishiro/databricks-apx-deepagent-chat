@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from ..core._config import AppConfig
+    from apx_deepagent_chat.backend.core._config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ def create_job_store(config: "AppConfig") -> Any:
     """
     backend = getattr(config, "job_store_backend", "memory")
     if backend == "sqlite":
-        from .sqlite_job_store import SQLiteJobStore
+        from .sqlite_job_store import SQLiteJobStore  # type: ignore[import-not-found]
 
         db_path = getattr(config, "job_store_db_path", "/tmp/apx_jobs.db")
         return SQLiteJobStore(db_path=db_path)
