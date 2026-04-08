@@ -1,10 +1,13 @@
-"""バックグラウンドエージェントジョブの状態とイベントバッファを管理するインメモリストア."""
+"""バックグラウンドエージェントジョブの状態とイベントバッファを管理するストア."""
 
 import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from ..core._config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +35,7 @@ class Job:
     approval_decisions: Optional[list[dict]] = None
 
 
-class JobStore:
+class InMemoryJobStore:
     """ジョブ状態とイベントバッファのインメモリストア."""
 
     def __init__(self) -> None:
@@ -110,6 +113,20 @@ class JobStore:
         """全ジョブを返す."""
         return list(self._jobs.values())
 
+    def register_task(self, job_id: str, task: asyncio.Task) -> None:
+        """バックグラウンドタスクを Job に関連付ける（graceful shutdown 用）."""
+        job = self._jobs.get(job_id)
+        if job:
+            job.task = task
+
+    def running_tasks(self) -> list[asyncio.Task]:
+        """実行中の全タスクを返す（graceful shutdown で cancel するため）."""
+        return [
+            job.task
+            for job in self._jobs.values()
+            if job.task and not job.task.done()
+        ]
+
     def cleanup(self) -> None:
         """10分以上前に完了したジョブを削除する."""
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
@@ -122,3 +139,22 @@ class JobStore:
             del self._jobs[job_id]
         if to_delete:
             logger.info("Cleaned up %d completed jobs", len(to_delete))
+
+
+# Keep JobStore as an alias for backwards compatibility
+JobStore = InMemoryJobStore
+
+
+def create_job_store(config: "AppConfig") -> Any:
+    """設定に基づいて適切な JobStore を返す。
+
+    JOB_STORE_BACKEND=sqlite のとき SQLiteJobStore を返す。
+    デフォルト（memory）では InMemoryJobStore を返す。
+    """
+    backend = getattr(config, "job_store_backend", "memory")
+    if backend == "sqlite":
+        from .sqlite_job_store import SQLiteJobStore
+
+        db_path = getattr(config, "job_store_db_path", "/tmp/apx_jobs.db")
+        return SQLiteJobStore(db_path=db_path)
+    return InMemoryJobStore()
