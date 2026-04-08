@@ -4,7 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 
 if TYPE_CHECKING:
     from apx_deepagent_chat.backend.core._config import AppConfig
@@ -96,6 +96,12 @@ class InMemoryJobStore:
             job.approval_decisions = decisions
             job.approval_event.set()
 
+    def mark_running(self, job_id: str) -> None:
+        """ジョブの status を 'running' に更新する."""
+        job = self._jobs.get(job_id)
+        if job:
+            job.status = "running"
+
     def mark_done(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
         if job:
@@ -108,6 +114,47 @@ class InMemoryJobStore:
             job.status = "error"
             job.error = error
             job.notify.set()
+
+    async def iter_events(
+        self, job_id: str, from_seq: int = 0
+    ) -> AsyncGenerator[JobEvent, None]:
+        """インメモリのイベントをストリームする（SSE ジェネレータ向け）."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            yield JobEvent(
+                id=-1,
+                event_type="error",
+                data={"error": "Job not found", "type": "error"},
+            )
+            return
+
+        while True:
+            # 溜まっているイベントをすべて yield する
+            while from_seq < len(job.events):
+                ev = job.events[from_seq]
+                yield ev
+                from_seq += 1
+
+            # 完了・エラー判定
+            if job.status == "error":
+                yield JobEvent(
+                    id=-1,
+                    event_type="error",
+                    data={"error": job.error or "Unknown error", "type": "error"},
+                )
+                return
+            if job.status == "done":
+                return
+
+            # 新しいイベントを待機する（race condition 安全パターン）
+            job.notify.clear()
+            if from_seq < len(job.events) or job.status in ("done", "error"):
+                continue
+            try:
+                await asyncio.wait_for(job.notify.wait(), timeout=30.0)
+            except asyncio.TimeoutError:
+                # タイムアウト時はループを継続（keepalive は _generate_sse 側で対処）
+                pass
 
     def all_jobs(self) -> list[Job]:
         """全ジョブを返す."""

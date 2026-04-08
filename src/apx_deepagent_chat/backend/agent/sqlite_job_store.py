@@ -152,6 +152,21 @@ class SQLiteJobStore:
     async def create_job(self, job_id: str) -> None:
         await asyncio.to_thread(self._do_create_job, job_id)
 
+    def _do_mark_running(self, job_id: str) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE jobs SET status = 'running', updated_at = ? WHERE job_id = ?",
+                (time.time(), job_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def mark_running(self, job_id: str) -> None:
+        """ジョブの status を 'running' に更新する."""
+        await asyncio.to_thread(self._do_mark_running, job_id)
+
     def _do_mark_done(self, job_id: str) -> None:
         conn = self._connect()
         try:
