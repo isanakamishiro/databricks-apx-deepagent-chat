@@ -44,8 +44,8 @@ class InterruptMiddleware(AgentMiddleware):
         # is_interrupt_requested は InMemoryJobStore では同期、SQLiteJobStore では
         # コルーチンを返す可能性があるため、コルーチンの場合は await する
         if asyncio.iscoroutine(result):
-            return await result
-        return result
+            return await result  # type: ignore[misc]
+        return bool(result)
 
     def before_model(self, state: Any, runtime: Runtime) -> None:
         # 同期コンテキスト: キャッシュ値のみ参照
@@ -64,7 +64,7 @@ class InterruptMiddleware(AgentMiddleware):
         return None
 
     async def aafter_model(self, state: Any, runtime: Runtime) -> None:
-        return await self.abefore_model(state, runtime)
+        await self.abefore_model(state, runtime)
 
 
 @wrap_tool_call  # type: ignore[arg-type]
