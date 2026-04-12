@@ -4,7 +4,7 @@ import json
 import logging
 import signal
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Literal
+from typing import Any, AsyncGenerator, Literal
 from uuid import uuid4
 
 import mlflow
@@ -24,7 +24,7 @@ from .agent import (  # also registers @invoke / @stream handlers
     _injected_sp_ws_client,
     stream_handler,
 )
-from .agent.job_store import JobStore
+from .agent.job_store import InMemoryJobStore, create_job_store
 from .agent.uc_checkpointer import UCBundleCheckpointer
 from .core._base import LifespanDependency
 from .core._factory import _chain_dep_lifespans
@@ -36,34 +36,37 @@ logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
 
-# ─── JobStore シングルトン ────────────────────────────────────────────────────
+# ─── ユーティリティ ──────────────────────────────────────────────────────────
 
-_job_store = JobStore()
+
+async def _maybe_await(result: Any) -> Any:
+    """同期・非同期両方の戻り値を透過的に await する."""
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
 
 
 # ─── 定期クリーンアップ ───────────────────────────────────────────────────────
 
 
-async def _periodic_cleanup(store: JobStore, interval: int = 300) -> None:
+async def _periodic_cleanup(store: Any, interval: int = 300) -> None:
     """interval 秒ごとに完了ジョブをクリーンアップする."""
     while True:
         await asyncio.sleep(interval)
-        store.cleanup()
+        await _maybe_await(store.cleanup())
 
 
 # ─── バックグラウンドエージェントタスク ──────────────────────────────────────
 
 
-async def _run_agent_background(job_id: str, body: dict) -> None:
+async def _run_agent_background(job_id: str, body: dict, store: Any) -> None:
     """エージェントをバックグラウンドで実行し、イベントを JobStore に蓄積する.
 
     HITL 承認が必要な場合は tool.approval_required イベントを発行し、
     ユーザー応答を待ってから Command(resume=...) でエージェントを再開する。
     """
-    job = _job_store.get_job(job_id)
-    if job is None:
-        return
-    job.status = "running"
+    _job_store = store
+    await _job_store.mark_running(job_id)
     # InterruptMiddleware が job_id を参照できるよう custom_inputs に注入する
     body.setdefault("custom_inputs", {})["job_id"] = job_id
     try:
@@ -94,24 +97,26 @@ async def _run_agent_background(job_id: str, body: dict) -> None:
                             break
                         data = event.model_dump(mode="json")
                         last_data = data
-                        _job_store.append_event(job_id, event_type, data)
+                        await _maybe_await(_job_store.append_event(job_id, event_type, data))
                 finally:
                     await gen.aclose()
 
                 if hitl_requests is None:
                     # 正常完了
-                    _job_store.mark_done(job_id)
+                    await _maybe_await(_job_store.mark_done(job_id))
                     break
 
                 # HITL 承認待ち: tool.approval_required を配信して待機
-                _job_store.append_event(
-                    job_id, "tool.approval_required", {"requests": hitl_requests}
+                await _maybe_await(
+                    _job_store.append_event(
+                        job_id, "tool.approval_required", {"requests": hitl_requests}
+                    )
                 )
                 decisions = await _job_store.wait_for_approval(job_id)
 
                 if decisions is None:
                     # ユーザーが割り込み (スレッド切り替え等) → 終了
-                    _job_store.mark_done(job_id)
+                    await _maybe_await(_job_store.mark_done(job_id))
                     break
 
                 # 再開: resume_decisions を custom_inputs に注入して再呼び出し
@@ -122,11 +127,11 @@ async def _run_agent_background(job_id: str, body: dict) -> None:
             if last_data is not None:
                 span.set_outputs(last_data)
     except asyncio.CancelledError:
-        _job_store.mark_error(job_id, "Interrupted by server shutdown")
+        await _maybe_await(_job_store.mark_error(job_id, "Interrupted by server shutdown"))
         raise
     except Exception:
         logger.exception("Background agent error for job %s", job_id)
-        _job_store.mark_error(job_id, "Agent processing failed")
+        await _maybe_await(_job_store.mark_error(job_id, "Agent processing failed"))
 
 
 # ─── SSE ジェネレータ ─────────────────────────────────────────────────────────
@@ -136,65 +141,31 @@ _SSE_CLOSE_AFTER = 100.0
 
 
 async def _generate_sse(
-    job_id: str, last_event_id: int, request: Request
+    job_id: str, last_event_id: int, request: Request, store: Any
 ) -> AsyncGenerator[str, None]:
     """SSE イベントをストリームする。Last-Event-ID から resume をサポートする."""
-    job = _job_store.get_job(job_id)
-    if job is None:
-        yield f"event: error\ndata: {json.dumps({'error': 'Job not found', 'type': 'error'})}\n\n"
-        return
-
     start_time = asyncio.get_event_loop().time()
-    event_index = last_event_id + 1  # 次に送るべき event_id
+    from_seq = last_event_id + 1
+    keepalive_sent_at = start_time
 
-    while True:
-        # クライアント切断チェック
+    async for ev in store.iter_events(job_id, from_seq=from_seq):
         if await request.is_disconnected():
             break
 
-        # 100 秒経過したらフロントエンドに再接続を促してクローズ
         elapsed = asyncio.get_event_loop().time() - start_time
         if elapsed >= _SSE_CLOSE_AFTER:
-            yield f"event: stream.timeout\ndata: {json.dumps({'last_event_id': event_index - 1})}\n\n"
+            yield f"event: stream.timeout\ndata: {json.dumps({'last_event_id': from_seq - 1})}\n\n"
             break
 
-        # 保留中のイベントをすべて送信
-        while event_index < len(job.events):
-            ev = job.events[event_index]
-            data_str = json.dumps(ev.data)
-            yield f"id: {ev.id}\nevent: {ev.event_type}\ndata: {data_str}\n\n"
-            event_index += 1
-
-        # ジョブ完了チェック
-        if job.status == "done":
-            break
-        if job.status == "error":
-            error_msg = job.error or "Unknown error"
-            yield f"event: error\ndata: {json.dumps({'error': error_msg, 'type': 'error'})}\n\n"
-            break
-
-        # 残り時間を計算（これを超えて待機しない）
-        remaining = _SSE_CLOSE_AFTER - (asyncio.get_event_loop().time() - start_time)
-        if remaining <= 0:
-            continue
-
-        # 新イベント待機（race condition 安全パターン）
-        job.notify.clear()
-        # clear と wait の間に到着したイベントをキャッチ
-        if event_index < len(job.events):
-            continue
-        if job.status in ("done", "error"):
-            continue
-
-        # min(30秒, 残り時間) でタイムアウト待機、タイムアウト時は keepalive コメントを送信
-        try:
-            await asyncio.wait_for(job.notify.wait(), timeout=min(30.0, remaining))
-        except asyncio.TimeoutError:
-            elapsed = asyncio.get_event_loop().time() - start_time
-            if elapsed >= _SSE_CLOSE_AFTER:
-                yield f"event: stream.timeout\ndata: {json.dumps({'last_event_id': event_index - 1})}\n\n"
-                break
+        now = asyncio.get_event_loop().time()
+        if now - keepalive_sent_at >= 30.0:
             yield ": keepalive\n\n"
+            keepalive_sent_at = now
+
+        data_str = json.dumps(ev.data)
+        yield f"id: {ev.id}\nevent: {ev.event_type}\ndata: {data_str}\n\n"
+        from_seq = ev.id + 1
+        keepalive_sent_at = asyncio.get_event_loop().time()
 
 
 # ─── レスポンスモデル ─────────────────────────────────────────────────────────
@@ -285,7 +256,7 @@ def _messages_to_frontend_format(lc_messages: list) -> list[dict]:
                         asst_blocks.append({"type": "text", "content": text})
 
                 elif block_type == "tool_call":
-                    call_id = block.get("id", "")
+                    call_id = block.get("id") or ""
                     name = block.get("name", "")
                     args = block.get("args", {})
                     arguments = (
@@ -331,6 +302,11 @@ from .models import ChatApproveRequest, ChatApproveResponse  # noqa: E402
 
 
 def create_server_app() -> FastAPI:
+    from .core._config import AppConfig
+
+    config = AppConfig()
+    _job_store = create_job_store(config)
+
     # AgentServer provides /invocations and /responses endpoints
     agent_server = AgentServer("ResponsesAgent")
     app = agent_server.app
@@ -345,15 +321,17 @@ def create_server_app() -> FastAPI:
 
     @asynccontextmanager
     async def _composed_lifespan(app):
+        # SQLiteJobStore の場合、起動時にテーブル作成とリカバリを実行する
+        if hasattr(_job_store, "initialize"):
+            await _job_store.initialize()
+        if hasattr(_job_store, "recover_stale_jobs"):
+            await _job_store.recover_stale_jobs()
+
         cleanup_task = asyncio.create_task(_periodic_cleanup(_job_store))
 
         async def _graceful_shutdown() -> None:
             """SIGTERM 受信時に実行中ジョブをキャンセルし MLflow トレースをフラッシュする."""
-            tasks_to_cancel = [
-                job.task
-                for job in _job_store.all_jobs()
-                if job.task and not job.task.done()
-            ]
+            tasks_to_cancel = _job_store.running_tasks()
             for task in tasks_to_cancel:
                 task.cancel()
             if tasks_to_cancel:
@@ -401,11 +379,16 @@ def create_server_app() -> FastAPI:
 
         body = await request.json()
         job_id = str(uuid4())
-        job = _job_store.create_job(job_id)
 
-        # ContextVar がコピーされた状態でバックグラウンドタスクを起動
-        task = asyncio.create_task(_run_agent_background(job_id, body))
-        job.task = task
+        # InMemoryJobStore は同期、SQLiteJobStore は非同期。両方に対応する。
+        if isinstance(_job_store, InMemoryJobStore):
+            job = _job_store.create_job(job_id)
+            task = asyncio.create_task(_run_agent_background(job_id, body, _job_store))
+            job.task = task
+        else:
+            await _job_store.create_job(job_id)
+            task = asyncio.create_task(_run_agent_background(job_id, body, _job_store))
+            _job_store.register_task(job_id, task)
 
         _injected_sp_ws_client.reset(tok_sp)
         _injected_job_store.reset(tok_js)
@@ -420,7 +403,9 @@ def create_server_app() -> FastAPI:
     )
     async def chat_interrupt(job_id: str, deep: bool = False):
         """指定ジョブに割り込みフラグをセットする。deep=True のときはサブエージェントも停止する（停止ボタン用）."""
-        _job_store.request_interrupt(job_id, deep=deep)
+        result = _job_store.request_interrupt(job_id, deep=deep)
+        if asyncio.iscoroutine(result):
+            await result
         return ChatInterruptResponse(ok=True)
 
     # ─── POST /api/chat/approve/{job_id} ─────────────────────────────────────
@@ -431,7 +416,9 @@ def create_server_app() -> FastAPI:
     )
     async def chat_approve(job_id: str, body: ChatApproveRequest):
         """HITL ツール承認の決定を受け取り、待機中のエージェントを再開する."""
-        _job_store.set_approval(job_id, [d.model_dump() for d in body.decisions])
+        result = _job_store.set_approval(job_id, [d.model_dump() for d in body.decisions])
+        if asyncio.iscoroutine(result):
+            await result
         return ChatApproveResponse(ok=True)
 
     # ─── GET /api/chat/stream/{job_id} ───────────────────────────────────────
@@ -445,7 +432,7 @@ def create_server_app() -> FastAPI:
             last_event_id = -1
 
         return StreamingResponse(
-            _generate_sse(job_id, last_event_id, request),
+            _generate_sse(job_id, last_event_id, request, _job_store),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )

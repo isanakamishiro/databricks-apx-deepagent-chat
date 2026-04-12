@@ -21,6 +21,10 @@ class InterruptMiddleware(AgentMiddleware):
 
     check_subagent=False (デフォルト): メインエージェント用。interrupt_requested フラグを参照。
     check_subagent=True: サブエージェント用。subagent_interrupt_requested フラグを参照。
+
+    非同期対応: abefore_model/aafter_model で job_store を非同期チェックし、
+    結果を _cached_interrupt にキャッシュする。同期の before_model/after_model は
+    キャッシュ値のみを参照する。
     """
 
     def __init__(
@@ -29,24 +33,38 @@ class InterruptMiddleware(AgentMiddleware):
         self.job_id = job_id
         self.job_store = job_store
         self.check_subagent = check_subagent
+        self._cached_interrupt: bool = False
+
+    async def _check_interrupt(self) -> bool:
+        """job_store から割り込みフラグを非同期で取得する."""
+        if self.check_subagent:
+            result = self.job_store.is_subagent_interrupt_requested(self.job_id)
+        else:
+            result = self.job_store.is_interrupt_requested(self.job_id)
+        # is_interrupt_requested は InMemoryJobStore では同期、SQLiteJobStore では
+        # コルーチンを返す可能性があるため、コルーチンの場合は await する
+        if asyncio.iscoroutine(result):
+            return await result  # type: ignore[misc]
+        return bool(result)
 
     def before_model(self, state: Any, runtime: Runtime) -> None:
-        if self.check_subagent:
-            if self.job_store.is_subagent_interrupt_requested(self.job_id):
-                langgraph_interrupt({"reason": "user_interrupt"})
-        else:
-            if self.job_store.is_interrupt_requested(self.job_id):
-                langgraph_interrupt({"reason": "user_interrupt"})
+        # 同期コンテキスト: キャッシュ値のみ参照
+        if self._cached_interrupt:
+            langgraph_interrupt({"reason": "user_interrupt"})
         return None
 
     def after_model(self, state: Any, runtime: Runtime) -> None:
         return self.before_model(state, runtime)
 
     async def abefore_model(self, state: Any, runtime: Runtime) -> None:
-        return self.before_model(state, runtime)
+        # 非同期: job_store をチェックしてキャッシュを更新
+        self._cached_interrupt = await self._check_interrupt()
+        if self._cached_interrupt:
+            langgraph_interrupt({"reason": "user_interrupt"})
+        return None
 
     async def aafter_model(self, state: Any, runtime: Runtime) -> None:
-        return self.after_model(state, runtime)
+        await self.abefore_model(state, runtime)
 
 
 @wrap_tool_call  # type: ignore[arg-type]

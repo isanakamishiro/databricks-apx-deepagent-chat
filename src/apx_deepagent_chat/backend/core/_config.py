@@ -28,6 +28,8 @@ class AppConfig(BaseSettings):
         env_nested_delimiter="__",
     )
     app_name: str = Field(default=app_name)
+    job_store_backend: str = "memory"            # "memory" | "sqlite"
+    job_store_db_path: str = "/tmp/apx_jobs.db"  # sqlite バックエンド使用時のDBパス
 
     @property
     def static_assets_path(self) -> Path:

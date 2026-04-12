@@ -1,10 +1,13 @@
-"""バックグラウンドエージェントジョブの状態とイベントバッファを管理するインメモリストア."""
+"""バックグラウンドエージェントジョブの状態とイベントバッファを管理するストア."""
 
 import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
+
+if TYPE_CHECKING:
+    from apx_deepagent_chat.backend.core._config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +35,7 @@ class Job:
     approval_decisions: Optional[list[dict]] = None
 
 
-class JobStore:
+class InMemoryJobStore:
     """ジョブ状態とイベントバッファのインメモリストア."""
 
     def __init__(self) -> None:
@@ -93,6 +96,12 @@ class JobStore:
             job.approval_decisions = decisions
             job.approval_event.set()
 
+    def mark_running(self, job_id: str) -> None:
+        """ジョブの status を 'running' に更新する."""
+        job = self._jobs.get(job_id)
+        if job:
+            job.status = "running"
+
     def mark_done(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
         if job:
@@ -106,9 +115,64 @@ class JobStore:
             job.error = error
             job.notify.set()
 
+    async def iter_events(
+        self, job_id: str, from_seq: int = 0
+    ) -> AsyncGenerator[JobEvent, None]:
+        """インメモリのイベントをストリームする（SSE ジェネレータ向け）."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            yield JobEvent(
+                id=-1,
+                event_type="error",
+                data={"error": "Job not found", "type": "error"},
+            )
+            return
+
+        while True:
+            # 溜まっているイベントをすべて yield する
+            while from_seq < len(job.events):
+                ev = job.events[from_seq]
+                yield ev
+                from_seq += 1
+
+            # 完了・エラー判定
+            if job.status == "error":
+                yield JobEvent(
+                    id=-1,
+                    event_type="error",
+                    data={"error": job.error or "Unknown error", "type": "error"},
+                )
+                return
+            if job.status == "done":
+                return
+
+            # 新しいイベントを待機する（race condition 安全パターン）
+            job.notify.clear()
+            if from_seq < len(job.events) or job.status in ("done", "error"):
+                continue
+            try:
+                await asyncio.wait_for(job.notify.wait(), timeout=30.0)
+            except asyncio.TimeoutError:
+                # タイムアウト時はループを継続（keepalive は _generate_sse 側で対処）
+                pass
+
     def all_jobs(self) -> list[Job]:
         """全ジョブを返す."""
         return list(self._jobs.values())
+
+    def register_task(self, job_id: str, task: asyncio.Task) -> None:
+        """バックグラウンドタスクを Job に関連付ける（graceful shutdown 用）."""
+        job = self._jobs.get(job_id)
+        if job:
+            job.task = task
+
+    def running_tasks(self) -> list[asyncio.Task]:
+        """実行中の全タスクを返す（graceful shutdown で cancel するため）."""
+        return [
+            job.task
+            for job in self._jobs.values()
+            if job.task and not job.task.done()
+        ]
 
     def cleanup(self) -> None:
         """10分以上前に完了したジョブを削除する."""
@@ -122,3 +186,22 @@ class JobStore:
             del self._jobs[job_id]
         if to_delete:
             logger.info("Cleaned up %d completed jobs", len(to_delete))
+
+
+# Keep JobStore as an alias for backwards compatibility
+JobStore = InMemoryJobStore
+
+
+def create_job_store(config: "AppConfig") -> Any:
+    """設定に基づいて適切な JobStore を返す。
+
+    JOB_STORE_BACKEND=sqlite のとき SQLiteJobStore を返す。
+    デフォルト（memory）では InMemoryJobStore を返す。
+    """
+    backend = getattr(config, "job_store_backend", "memory")
+    if backend == "sqlite":
+        from .sqlite_job_store import SQLiteJobStore  # type: ignore[import-not-found]
+
+        db_path = getattr(config, "job_store_db_path", "/tmp/apx_jobs.db")
+        return SQLiteJobStore(db_path=db_path)
+    return InMemoryJobStore()
